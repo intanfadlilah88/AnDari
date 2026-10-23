@@ -1,7 +1,7 @@
 import axios from "axios";
 // BENAR (path proyek Expo baru)
 import { getBuilding } from '../api/api';
-const API_BASE = "http://127.0.0.1:8000/api";
+const API_BASE = "http://127.0.0.12:8000/api";
 
 export const api = axios.create({
   baseURL: API_BASE,
