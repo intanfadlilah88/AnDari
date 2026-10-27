@@ -18,21 +18,18 @@ import {
 import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { Stack } from "expo-router"; // ✅ Tambahkan import Stack
 
-// ✅ PERBAIKAN: Gunakan satu titik (../) untuk mundur ke folder src
 import { AnimatedSplashOverlay } from "../components/animated-icon";
 import AppTabs from "../components/app-tabs";
-
-// ✅ PERBAIKAN: Gunakan satu titik (../) untuk mundur ke folder src
 import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
-import { getToken } from "../services/storage";
+import { getToken, saveAuth } from "../services/storage";
 
-// Cegah splash screen auto-hide
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // ============================================
-// CUSTOM LIGHT THEME
+// CUSTOM THEME
 // ============================================
 const CustomLightTheme = {
   ...DefaultTheme,
@@ -47,9 +44,6 @@ const CustomLightTheme = {
   },
 };
 
-// ============================================
-// CUSTOM DARK THEME
-// ============================================
 const CustomDarkTheme = {
   ...DarkTheme,
   colors: {
@@ -64,17 +58,15 @@ const CustomDarkTheme = {
 };
 
 // ============================================
-// ROOT LAYOUT (DENGAN AUTH STATE)
+// ROOT LAYOUT
 // ============================================
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
-  // State untuk cek login
   const [isLoading, setIsLoading] = useState(true);
   const [token, setToken] = useState<string | null>(null);
   const [showRegister, setShowRegister] = useState(false);
 
-  // Cek token saat pertama kali dibuka
   useEffect(() => {
     SplashScreen.hideAsync().catch(() => {});
     checkAuth();
@@ -87,7 +79,15 @@ export default function RootLayout() {
     setIsLoading(false);
   };
 
-  // Loading Screen (menunggu AsyncStorage)
+  const handleBypassLogin = async (newToken: string) => {
+    await saveAuth(newToken, {
+      id: 0,
+      email: "admin@andari.com",
+      nama: "Admin",
+    });
+    setToken(newToken);
+  };
+
   if (isLoading) {
     return (
       <View
@@ -101,7 +101,7 @@ export default function RootLayout() {
     );
   }
 
-  // Jika BELUM LOGIN -> Tampilkan Login / Register
+  // TAMPILAN JIKA BELUM LOGIN
   if (!token) {
     return (
       <GestureHandlerRootView style={styles.container}>
@@ -118,6 +118,7 @@ export default function RootLayout() {
               <LoginScreen
                 onGoToRegister={() => setShowRegister(true)}
                 onSuccessLogin={(newToken) => setToken(newToken)}
+                onBypassLogin={handleBypassLogin}
               />
             )}
           </ThemeProvider>
@@ -126,7 +127,7 @@ export default function RootLayout() {
     );
   }
 
-  // Jika SUDAH LOGIN -> Tampilkan Aplikasi Utama (AppTabs)
+  // TAMPILAN JIKA SUDAH LOGIN (MENGGUNAKAN STACK NAVIGATOR)
   return (
     <GestureHandlerRootView style={styles.container}>
       <SafeAreaProvider>
@@ -134,16 +135,26 @@ export default function RootLayout() {
           value={colorScheme === "dark" ? CustomDarkTheme : CustomLightTheme}
         >
           <AnimatedSplashOverlay />
-          <AppTabs />
+
+          {/* ✅ PERBAIKAN: Bungkus AppTabs dengan Stack agar bisa navigasi ke halaman lain */}
+          <Stack screenOptions={{ headerShown: false }}>
+            {/* Layar Utama (Tab) */}
+            <Stack.Screen name="index" />
+
+            {/* Layar Tujuan Navigasi */}
+            <Stack.Screen name="form-proyek" />
+            <Stack.Screen name="grid-denah" />
+            <Stack.Screen name="viewer-3d" />
+            <Stack.Screen name="rab" />
+            <Stack.Screen name="projek" />
+            <Stack.Screen name="explore" />
+          </Stack>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
 
-// ============================================
-// STYLES
-// ============================================
 const styles = StyleSheet.create({
   container: {
     flex: 1,

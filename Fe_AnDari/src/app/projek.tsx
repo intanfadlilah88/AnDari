@@ -14,18 +14,23 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import axios from "axios";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // ⚠️ GANTI IP INI dengan IP laptop kamu (cek dengan `ipconfig`)
 const API_URL = "http://192.168.110.12:8000/api";
+const LOCAL_PROJECTS_KEY = "@andari_local_projects";
 
+// Tipe data disamakan dengan output form-proyek.tsx
 type Project = {
-  id: number;
+  id: number | string;
   nama_proyek: string;
-  panjang_lahan: string;
-  lebar_lahan: string;
-  jumlah_lantai: number;
-  gaya_arsitektur: string;
+  bentuk_lahan: string;
+  panjang_lahan: number;
+  lebar_lahan: number;
+  luas_lahan: number;
+  region_nama?: string;
   created_at: string;
+  backendOK?: boolean;
 };
 
 export default function ProjekScreen() {
@@ -35,61 +40,75 @@ export default function ProjekScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ Pakai useCallback supaya bisa dipanggil berulang tanpa re-render
+  // ✅ Fetch data dari Backend DAN Local Storage (Offline Mode)
   const fetchProjects = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) setRefreshing(true);
       else setLoading(true);
       setError(null);
 
-      const res = await axios.get(`${API_URL}/projects/`, {
-        timeout: 10000, // ✅ Timeout 10 detik, biar tidak nunggu selamanya
-      });
+      let allProjects: Project[] = [];
 
-      // ✅ Pastikan data yang diterima berupa array
-      const data = Array.isArray(res.data)
-        ? res.data
-        : (res.data.results ?? []);
-      setProjects(data);
-    } catch (err: any) {
-      console.error("Gagal ambil proyek:", err?.message);
-
-      // ✅ Pesan error yang lebih jelas
-      let pesan = "Tidak bisa terhubung ke server.";
-      if (err?.code === "ECONNABORTED") {
-        pesan = "Koneksi timeout. Periksa jaringan kamu.";
-      } else if (err?.response?.status === 404) {
-        pesan = "Endpoint /api/projects/ tidak ditemukan di server.";
-      } else if (err?.response?.status >= 500) {
-        pesan = "Server sedang bermasalah. Coba lagi nanti.";
+      // 1. Ambil data dari Local Storage (Hasil input form-proyek yang Offline)
+      try {
+        const localData = await AsyncStorage.getItem(LOCAL_PROJECTS_KEY);
+        if (localData) {
+          allProjects = [...JSON.parse(localData)];
+        }
+      } catch (e) {
+        console.warn("Gagal baca local projects", e);
       }
-      setError(pesan);
+
+      // 2. Ambil data dari Backend API (Jika server menyala)
+      try {
+        const res = await axios.get(`${API_URL}/projects/`, {
+          timeout: 5000, // Timeout sebentar agar tidak kelamaan loading
+        });
+        const data = Array.isArray(res.data)
+          ? res.data
+          : (res.data.results ?? []);
+
+        // Gabungkan data API dengan data Lokal
+        allProjects = [...data, ...allProjects];
+      } catch (err: any) {
+        console.log("Gagal mengambil dari server, menggunakan data lokal.");
+        // Jika API gagal, kita tetap tampilkan data lokal (jika ada)
+        if (allProjects.length === 0) {
+          setError("Gagal terhubung ke server & belum ada proyek lokal.");
+        }
+      }
+
+      setProjects(allProjects);
+    } catch (err: any) {
+      setError("Terjadi kesalahan saat memuat data.");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  // ✅ Fetch pertama kali
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
 
-  // ✅ Handler saat user tarik layar ke bawah
   const onRefresh = () => {
     fetchProjects(true);
   };
 
-  // ✅ Handler saat user klik item proyek
   const handlePressProject = (item: Project) => {
+    // Arahkan ke halaman RAB dengan membawa ID proyek
     router.push({
       pathname: "/rab",
       params: { projectId: item.id.toString() },
     });
   };
 
-  // ✅ Format tanggal (opsional, biar rapi)
-  const formatTanggal = (iso: string) => {
+  const handleCreateNew = () => {
+    router.push("/form-proyek");
+  };
+
+  const formatTanggal = (iso?: string) => {
+    if (!iso) return "-";
     try {
       const d = new Date(iso);
       return d.toLocaleDateString("id-ID", {
@@ -110,14 +129,22 @@ export default function ProjekScreen() {
     >
       <View style={{ flex: 1 }}>
         <Text style={styles.cardTitle} numberOfLines={1}>
-          {item.nama_proyek}
+          {item.nama_proyek || "Tanpa Nama"}
         </Text>
+
+        {/* Menampilkan data persis seperti di form-proyek */}
         <Text style={styles.cardSub}>
-          {item.panjang_lahan}m × {item.lebar_lahan}m · {item.jumlah_lantai}{" "}
-          lantai
+          {item.panjang_lahan} m × {item.lebar_lahan} m • {item.luas_lahan} m²
         </Text>
+
         <View style={styles.cardFooter}>
-          <Text style={styles.cardSub}>{item.gaya_arsitektur}</Text>
+          <Text style={styles.cardSub}>
+            {item.bentuk_lahan === "kotak"
+              ? "Kotak"
+              : item.bentuk_lahan === "polygon-sisi"
+                ? "Polygon Sisi"
+                : "Polygon Bebas"}
+          </Text>
           <Text style={styles.cardDate}>{formatTanggal(item.created_at)}</Text>
         </View>
       </View>
@@ -134,7 +161,6 @@ export default function ProjekScreen() {
         </Text>
       </View>
 
-      {/* 🔄 State: LOADING */}
       {loading && !refreshing && (
         <ActivityIndicator
           size="large"
@@ -143,8 +169,7 @@ export default function ProjekScreen() {
         />
       )}
 
-      {/* ❌ State: ERROR */}
-      {!loading && error && (
+      {!loading && error && projects.length === 0 && (
         <View style={styles.empty}>
           <Ionicons name="cloud-offline-outline" size={60} color="#F87171" />
           <Text style={[styles.emptyText, { color: "#B91C1C" }]}>
@@ -160,35 +185,41 @@ export default function ProjekScreen() {
         </View>
       )}
 
-      {/* 📭 State: KOSONG */}
       {!loading && !error && projects.length === 0 && (
         <View style={styles.empty}>
           <Ionicons name="folder-open-outline" size={60} color="#CBD5E1" />
           <Text style={styles.emptyText}>Belum ada proyek</Text>
           <Text style={styles.emptySub}>
-            Mulai buat rancangan rumah pertamamu
+            Mulai buat rancangan rumah pertamamu dengan tap tombol + di bawah
           </Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={handleCreateNew}>
+            <Ionicons name="add" size={18} color="#FFFFFF" />
+            <Text style={styles.retryText}> Buat Proyek Baru</Text>
+          </TouchableOpacity>
         </View>
       )}
 
-      {/* 📋 State: ADA DATA */}
-      {!loading && !error && projects.length > 0 && (
+      {!loading && projects.length > 0 && (
         <FlatList
           data={projects}
-          keyExtractor={(item) => item.id.toString()}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
           renderItem={renderItem}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={["#0F172A"]}
+              tintColor="#0F172A"
+            />
           }
           showsVerticalScrollIndicator={false}
         />
       )}
 
-      {/* ➕ FAB: Buat proyek baru */}
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => router.push("/")}
+        onPress={handleCreateNew}
         activeOpacity={0.8}
       >
         <Ionicons name="add" size={26} color="white" />
@@ -199,7 +230,6 @@ export default function ProjekScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
-
   header: { padding: 20, paddingBottom: 8 },
   title: { fontSize: 24, fontWeight: "bold", color: "#0F172A" },
   subtitle: { color: "#64748B", marginTop: 4 },
@@ -213,7 +243,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    // shadow ringan biar terlihat modern
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -242,7 +271,12 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     marginTop: 12,
   },
-  emptySub: { color: "#64748B", marginTop: 4, textAlign: "center" },
+  emptySub: {
+    color: "#64748B",
+    marginTop: 4,
+    textAlign: "center",
+    lineHeight: 20,
+  },
 
   retryBtn: {
     marginTop: 20,
@@ -250,6 +284,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 10,
     borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
   },
   retryText: { color: "white", fontWeight: "600" },
 

@@ -1,3 +1,5 @@
+// src/app/index.tsx
+
 import React from "react";
 import {
   View,
@@ -6,22 +8,41 @@ import {
   ScrollView,
   TouchableOpacity,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context"; // ✅ GANTI
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
+// ============================================
+// DATA ALUR APLIKASI (Dengan tujuan Navigasi)
+// ============================================
 const ALUR_APLIKASI = [
-  { id: "01", title: "Luas tanah", desc: "Lebar, panjang, lantai, gaya rumah" },
-  { id: "02", title: "Denah 2D", desc: "Susun ruangan di atas grid meter" },
+  {
+    id: "01",
+    title: "Luas tanah",
+    desc: "Lebar, panjang, bentuk lahan, lokasi",
+    icon: "home-outline",
+    route: "/form-proyek", // Mengarah ke input data proyek/lahan
+  },
+  {
+    id: "02",
+    title: "Denah 2D",
+    desc: "Susun ruangan di atas grid meter",
+    icon: "grid-outline",
+    route: "/grid-denah", // Mengarah ke halaman grid denah
+  },
   {
     id: "03",
     title: "Tampilan 3D",
     desc: "Lihat bentuk rumah dari berbagai sisi",
+    icon: "cube-outline",
+    route: "/viewer-3d", // Mengarah ke halaman 3D
   },
   {
     id: "04",
     title: "Daerah & RAB",
-    desc: "Harga bahan, toko, upah, alat, total",
+    desc: "Estimasi harga bahan, toko, upah, alat, total",
+    icon: "calculator-outline",
+    route: "/rab", // Mengarah ke halaman RAB
   },
 ];
 
@@ -49,8 +70,9 @@ export default function HomeScreen() {
             Desain Rumahmu,{"\n"}Hitung Estimasi RAB-nya!
           </Text>
           <Text style={styles.heroDescription}>
-            Rancang rumah impianmu mulai dari ukuran tanah, susun denah 2D, lihat bentuk rumah 3D, lalu
-            hitung estimasi biaya pembagunannya dengan mudah bersama AnDari.
+            Rancang rumah impianmu mulai dari ukuran tanah, susun denah 2D,
+            lihat bentuk rumah 3D, lalu hitung estimasi biaya pembagunannya
+            dengan mudah bersama AnDari.
           </Text>
         </View>
 
@@ -58,35 +80,24 @@ export default function HomeScreen() {
         <View style={styles.sectionContainer}>
           <Text style={styles.sectionTitle}>Alur aplikasi</Text>
           <Text style={styles.sectionSubtitle}>
-            Semua data tersimpan dalam satu rancangan.
+            Ketuk pada salah satu langkah di bawah untuk mulai.
           </Text>
 
           {ALUR_APLIKASI.map((item) => (
-            <View key={item.id} style={styles.card}>
+            <TouchableOpacity
+              key={item.id}
+              style={styles.card}
+              onPress={() => router.push(item.route as any)}
+              activeOpacity={0.7}
+            >
               <Text style={styles.cardNumber}>{item.id}</Text>
               <View style={styles.cardContent}>
                 <Text style={styles.cardTitle}>{item.title}</Text>
                 <Text style={styles.cardDesc}>{item.desc}</Text>
               </View>
-            </View>
+              <Ionicons name="chevron-forward" size={20} color="#94A3B8" />
+            </TouchableOpacity>
           ))}
-        </View>
-
-        {/* Tombol Mulai — sekarang di dalam ScrollView */}
-        <View style={styles.footer}>
-          <TouchableOpacity
-            style={styles.button}
-            onPress={() => router.push("/form-proyek")}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.buttonText}>Mulai membuat rancangan</Text>
-            <Ionicons
-              name="arrow-forward"
-              size={20}
-              color="#FFFFFF"
-              style={{ marginLeft: 8 }}
-            />
-          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -96,12 +107,12 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#1A2B4C", // ✅ Background atas navy (untuk header)
+    backgroundColor: "#1A2B4C",
   },
 
   scrollContent: {
-    paddingBottom: 120, // ✅ Ruang untuk tab bar bawah
-    backgroundColor: "#F3F4F6", // ✅ Background konten abu terang
+    paddingBottom: 120,
+    backgroundColor: "#F3F4F6",
     flexGrow: 1,
   },
 
@@ -112,7 +123,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 16, // ✅ Dikurangi (SafeAreaView sudah kasih ruang)
+    paddingTop: 16,
     paddingBottom: 16,
   },
   headerTitle: {
@@ -127,8 +138,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#1A2B4C",
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 40, // ✅ Sedikit lebih besar biar napas
-    borderBottomLeftRadius: 24, // ✅ Lebih smooth
+    paddingBottom: 40,
+    borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
   },
   heroSubtitle: {
@@ -176,7 +187,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 12,
-    // ✅ Ganti elevation dengan shadow (lebih halus)
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -202,31 +212,5 @@ const styles = StyleSheet.create({
   cardDesc: {
     fontSize: 13,
     color: "#6B7280",
-  },
-
-  // ============ FOOTER & BUTTON ============
-  footer: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    marginTop: 4,
-  },
-  button: {
-    backgroundColor: "#1A2B4C",
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row", // ✅ Biar ada icon di samping
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  buttonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "bold",
   },
 });

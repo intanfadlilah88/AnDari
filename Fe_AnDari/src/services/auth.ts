@@ -2,60 +2,72 @@
 import axios from "axios";
 import { saveAuth, clearAuth, AuthUser } from "./storage";
 
-// ⚠️ GANTI IP INI (pastikan sama persis dengan IPv4 di CMD laptop Anda)
+// ⚠️ IP ini tidak akan dipakai selama mode simulasi menyala
 const API_URL = "http://192.168.110.12:8000/api";
 
-// ✅ PERBAIKAN 1: Buat instance Axios dengan konfigurasi khusus
+// ✅ KUNCI SIMULASI: Ubah ini menjadi 'true' agar tidak butuh server Django
+const USE_MOCK_API = true;
+
+export type LoginPayload = { email: string; password: string };
+export type RegisterPayload = { email: string; password: string; nama: string };
+export type AuthResponse = { token: string; user: AuthUser };
+
+// ============================================
+// FUNGSI SIMULASI (MOCK)
+// ============================================
+async function mockLogin(payload: LoginPayload): Promise<AuthResponse> {
+  console.log("🟡 [MOCK] Simulasi Login...");
+  await new Promise((resolve) => setTimeout(resolve, 800)); // Pura-pura loading 0.8 detik
+
+  const dummyUser: AuthUser = {
+    id: 1,
+    email: payload.email,
+    nama: "User Simulasi",
+  };
+  const dummyToken = "simulasi-token-12345";
+
+  await saveAuth(dummyToken, dummyUser);
+  return { token: dummyToken, user: dummyUser };
+}
+
+async function mockRegister(payload: RegisterPayload): Promise<AuthResponse> {
+  console.log("🟡 [MOCK] Simulasi Registrasi...");
+  await new Promise((resolve) => setTimeout(resolve, 800));
+
+  const dummyUser: AuthUser = {
+    id: Date.now(),
+    email: payload.email,
+    nama: payload.nama,
+  };
+  const dummyToken = "simulasi-token-12345";
+
+  await saveAuth(dummyToken, dummyUser);
+  return { token: dummyToken, user: dummyUser };
+}
+
+// ============================================
+// FUNGSI ASLI (API)
+// ============================================
 const api = axios.create({
   baseURL: API_URL,
-  timeout: 15000, // Naikkan timeout menjadi 15 detik (jaringan lokal kadang lambat)
-  headers: {
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  },
-  // ✅ PERBAIKAN 2: Izinkan pengiriman cookie/kredensial antar origin
+  timeout: 20000,
+  headers: { "Content-Type": "application/json", Accept: "application/json" },
   withCredentials: true,
 });
 
-export type LoginPayload = {
-  email: string;
-  password: string;
-};
-
-export type RegisterPayload = {
-  email: string;
-  password: string;
-  nama: string;
-};
-
-export type AuthResponse = {
-  token: string;
-  user: AuthUser;
-};
-
 export async function login(payload: LoginPayload): Promise<AuthResponse> {
+  if (USE_MOCK_API) return mockLogin(payload);
+
+  // Kode asli di bawah ini hanya jalan jika USE_MOCK_API = false
   try {
-    console.log("🟢 [AUTH] Mencoba Login ke:", `${API_URL}/auth/login/`);
-
-    // ✅ PERBAIKAN 3: Gunakan 'api.post' bukan 'axios.post'
+    console.log("🟢 [API] Mencoba Login ke:", `${API_URL}/auth/login/`);
     const res = await api.post("/auth/login/", payload);
-
-    console.log("🟢 [AUTH] Login Sukses:", res.data);
     const { token, user } = res.data;
-
     if (!token || !user) throw new Error("Respons server tidak valid.");
     await saveAuth(token, user);
     return { token, user };
   } catch (error: any) {
-    console.log("🔴 [AUTH] Login Gagal!");
-    console.log("🔴 Detail Error:", error?.message);
-    if (error?.response) {
-      console.log(
-        "🔴 Server Merespons:",
-        error.response.status,
-        error.response.data,
-      );
-    }
+    console.log("🔴 [API] Login Gagal:", error?.message);
     throw error;
   }
 }
@@ -63,27 +75,17 @@ export async function login(payload: LoginPayload): Promise<AuthResponse> {
 export async function register(
   payload: RegisterPayload,
 ): Promise<AuthResponse> {
+  if (USE_MOCK_API) return mockRegister(payload);
+
   try {
-    console.log("🟢 [AUTH] Mencoba Register ke:", `${API_URL}/auth/register/`);
-
+    console.log("🟢 [API] Mencoba Register ke:", `${API_URL}/auth/register/`);
     const res = await api.post("/auth/register/", payload);
-
-    console.log("🟢 [AUTH] Register Sukses:", res.data);
     const { token, user } = res.data;
-
     if (!token || !user) throw new Error("Respons server tidak valid.");
     await saveAuth(token, user);
     return { token, user };
   } catch (error: any) {
-    console.log("🔴 [AUTH] Register Gagal!");
-    console.log("🔴 Detail Error:", error?.message);
-    if (error?.response) {
-      console.log(
-        "🔴 Server Merespons:",
-        error.response.status,
-        error.response.data,
-      );
-    }
+    console.log("🔴 [API] Register Gagal:", error?.message);
     throw error;
   }
 }
@@ -93,23 +95,5 @@ export async function logout(): Promise<void> {
 }
 
 export function parseAuthError(err: any): string {
-  if (err?.response?.data) {
-    const data = err.response.data;
-    if (typeof data === "string") return data;
-    if (data.detail) return data.detail;
-    if (data.error) return data.error;
-    if (data.message) return data.message;
-
-    const firstKey = Object.keys(data)[0];
-    if (firstKey) {
-      const val = data[firstKey];
-      if (Array.isArray(val)) return val[0];
-      if (typeof val === "string") return val;
-    }
-  }
-  if (err?.code === "ECONNABORTED") return "Koneksi timeout. Periksa jaringan.";
-  if (err?.message === "Network Error")
-    return "Gagal terhubung. Pastikan Django jalan di 0.0.0.0:8000 dan IP benar.";
-
   return err?.message || "Terjadi kesalahan sistem.";
 }
