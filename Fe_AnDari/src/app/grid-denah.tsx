@@ -34,6 +34,8 @@ const API_TIMEOUT = 10000;
 // ============================================
 const MIN_SCALE = 8;
 const MAX_SCALE = 80;
+const MIN_CANVAS_SCALE = 0.15;
+const MAX_CANVAS_SCALE = 5;
 
 const PADDING_X = 40;
 const PADDING_Y = 40;
@@ -41,6 +43,16 @@ const GRID_METER = 1;
 const WALL_THICKNESS = 4;
 const HIT_THRESHOLD = 0.35;
 const WALL_HIT_THRESHOLD = 0.4;
+const MAX_HISTORY = 50;
+
+// ✅ bbox default saat mode bebas belum digambar
+const DEFAULT_FREE_BBOX = 50;
+// ✅ padding ruang kosong di sekitar draft polygon (meter)
+const FREE_MODE_MARGIN = 10;
+// ✅ batas minimal scale agar garis minor (1m) masih tampil
+const MIN_SCALE_SHOW_MINOR = 6;
+// ✅ batas total garis agar tidak freeze
+const MAX_TOTAL_GRID_LINES = 2000;
 
 // ============================================
 // TIPE
@@ -73,6 +85,7 @@ type Door = {
   position: number;
   swingDirection: "in" | "out";
   hingeSide: "left" | "right";
+  width: number;
 };
 
 type WindowType = "casement" | "sliding" | "awning" | "fixed" | "jalousie";
@@ -83,6 +96,7 @@ type Window = {
   type: WindowType;
   swingDirection?: "in" | "out";
   hingeSide?: "left" | "right";
+  width: number;
 };
 
 type Wall = {
@@ -119,6 +133,12 @@ type PlacedArea = {
   centerY: number;
 };
 
+type HistorySnapshot = {
+  rooms: PlacedRoom[];
+  walls: Wall[];
+  areas: PlacedArea[];
+};
+
 const ROOM_TYPES = [
   { nama: "K. Tidur", color: "rgba(173, 216, 230, 0.55)" },
   { nama: "K. Mandi", color: "rgba(255, 228, 196, 0.65)" },
@@ -131,7 +151,6 @@ const snapGrid = (v: number) => Math.round(v / GRID_METER) * GRID_METER;
 
 // ============================================
 // HELPER: NORMALIZE POLYGON KE (0,0)
-// (dipindahkan ke TOP-LEVEL agar tidak re-create tiap render)
 // ============================================
 function normalizePolygonToOrigin(poly: { x: number; y: number }[]) {
   if (!poly || poly.length === 0) return poly;
@@ -169,7 +188,14 @@ function isPointInPolygon(
   x: number,
   y: number,
   polygon: { x: number; y: number }[],
+  tolerance = 0.15,
 ): boolean {
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    const dist = distanceToSegment(x, y, a.x, a.y, b.x, b.y);
+    if (dist <= tolerance) return true;
+  }
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
     const xi = polygon[i].x,
@@ -187,6 +213,7 @@ function isPointInPolygon(
 function isRoomInsidePolygon(
   room: { x: number; y: number; panjang: number; lebar: number },
   polygon: { x: number; y: number }[],
+  tolerance = 0.15,
 ): boolean {
   const corners = [
     { x: room.x, y: room.y },
@@ -194,7 +221,7 @@ function isRoomInsidePolygon(
     { x: room.x + room.panjang, y: room.y + room.lebar },
     { x: room.x, y: room.y + room.lebar },
   ];
-  return corners.every((c) => isPointInPolygon(c.x, c.y, polygon));
+  return corners.every((c) => isPointInPolygon(c.x, c.y, polygon, tolerance));
 }
 
 function polygonArea(points: { x: number; y: number }[]): number {
@@ -206,32 +233,6 @@ function polygonArea(points: { x: number; y: number }[]): number {
     area -= points[j].x * points[i].y;
   }
   return Math.abs(area) / 2;
-}
-
-function doSegmentsIntersect(
-  ax1: number,
-  ay1: number,
-  ax2: number,
-  ay2: number,
-  bx1: number,
-  by1: number,
-  bx2: number,
-  by2: number,
-): boolean {
-  const d1 = crossProduct(bx1, by1, bx2, by2, ax1, ay1);
-  const d2 = crossProduct(bx1, by1, bx2, by2, ax2, ay2);
-  const d3 = crossProduct(ax1, ay1, ax2, ay2, bx1, by1);
-  const d4 = crossProduct(ax1, ay1, ax2, ay2, bx2, by2);
-  if (
-    ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
-    ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
-  )
-    return true;
-  if (d1 === 0 && onSegment(bx1, by1, bx2, by2, ax1, ay1)) return true;
-  if (d2 === 0 && onSegment(bx1, by1, bx2, by2, ax2, ay2)) return true;
-  if (d3 === 0 && onSegment(ax1, ay1, ax2, ay2, bx1, by1)) return true;
-  if (d4 === 0 && onSegment(ax1, ay1, ax2, ay2, bx2, by2)) return true;
-  return false;
 }
 
 function crossProduct(
@@ -259,24 +260,6 @@ function onSegment(
     Math.min(ay, by) <= cy &&
     cy <= Math.max(ay, by)
   );
-}
-
-function doWallCrossPolygon(
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-  polygon: { x: number; y: number }[],
-): boolean {
-  if (polygon.length < 3) return false;
-  for (let i = 0; i < polygon.length; i++) {
-    const p1 = polygon[i];
-    const p2 = polygon[(i + 1) % polygon.length];
-    if (doSegmentsIntersect(ax, ay, bx, by, p1.x, p1.y, p2.x, p2.y)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function lineSegmentIntersection(
@@ -640,27 +623,62 @@ export default function GridDenahScreen() {
     (!lahanPolygon || lahanPolygon.length < 3);
 
   // ============================================
-  // effectiveBBox — DIDEKLARASI LEBIH DULU
+  // ✅ EFFECTIVE BBOX DINAMIS — GRID 1m KONSISTEN
   // ============================================
   const effectiveBBox = useMemo(() => {
-    if (isBebasBelumDigambar) {
-      return { minX: 0, minY: 0, maxX: 20, maxY: 20 };
-    }
+    // Polygon final → pakai polygon, selalu mulai dari 0
     if (lahanPolygon && lahanPolygon.length >= 3) {
       const xs = lahanPolygon.map((p) => p.x);
       const ys = lahanPolygon.map((p) => p.y);
-      const maxX = Math.max(...xs, 1);
-      const maxY = Math.max(...ys, 1);
-      return { minX: 0, minY: 0, maxX, maxY };
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      const maxX = Math.max(...xs);
+      const maxY = Math.max(...ys);
+      return {
+        minX: Math.min(0, Math.floor(minX)),
+        minY: Math.min(0, Math.floor(minY)),
+        maxX: Math.max(1, Math.ceil(maxX)),
+        maxY: Math.max(1, Math.ceil(maxY)),
+      };
     }
+
+    // Mode bebas sedang menggambar → bbox tumbuh mengikuti draft + margin
+    if (isBebasBelumDigambar && lahanDraft.length > 0) {
+      const xs = lahanDraft.map((p) => p.x);
+      const ys = lahanDraft.map((p) => p.y);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      const maxX = Math.max(...xs);
+      const maxY = Math.max(...ys);
+      return {
+        minX: Math.min(0, Math.floor(minX - FREE_MODE_MARGIN)),
+        minY: Math.min(0, Math.floor(minY - FREE_MODE_MARGIN)),
+        maxX: Math.max(DEFAULT_FREE_BBOX, Math.ceil(maxX + FREE_MODE_MARGIN)),
+        maxY: Math.max(DEFAULT_FREE_BBOX, Math.ceil(maxY + FREE_MODE_MARGIN)),
+      };
+    }
+
+    // Mode bebas kosong
+    if (isBebasBelumDigambar) {
+      return {
+        minX: 0,
+        minY: 0,
+        maxX: DEFAULT_FREE_BBOX,
+        maxY: DEFAULT_FREE_BBOX,
+      };
+    }
+
+    // Kotak / polygon-sisi biasa
     const w = Math.max(bbox.maxX - bbox.minX, 1);
     const h = Math.max(bbox.maxY - bbox.minY, 1);
-    return { minX: 0, minY: 0, maxX: w, maxY: h };
-  }, [isBebasBelumDigambar, lahanPolygon, bbox]);
+    return {
+      minX: Math.min(0, Math.floor(bbox.minX)),
+      minY: Math.min(0, Math.floor(bbox.minY)),
+      maxX: Math.max(1, Math.ceil(bbox.maxX || w)),
+      maxY: Math.max(1, Math.ceil(bbox.maxY || h)),
+    };
+  }, [isBebasBelumDigambar, lahanPolygon, lahanDraft, bbox]);
 
-  // ============================================
-  // panjangLahan & tinggiLahan — DERIVED DARI effectiveBBox
-  // ============================================
   const panjangLahan = useMemo(
     () => Math.max(effectiveBBox.maxX - effectiveBBox.minX, 1),
     [effectiveBBox],
@@ -670,6 +688,9 @@ export default function GridDenahScreen() {
     [effectiveBBox],
   );
 
+  // ============================================
+  // STATE UTAMA
+  // ============================================
   const [selectedRoomType, setSelectedRoomType] = useState(ROOM_TYPES[0]);
   const [placedRooms, setPlacedRooms] = useState<PlacedRoom[]>([]);
   const [walls, setWalls] = useState<Wall[]>([]);
@@ -717,6 +738,7 @@ export default function GridDenahScreen() {
   } | null>(null);
   const [doorSwing, setDoorSwing] = useState<"in" | "out">("out");
   const [doorHinge, setDoorHinge] = useState<"left" | "right">("left");
+  const [doorWidth, setDoorWidth] = useState("0.8");
 
   const [windowModalVisible, setWindowModalVisible] = useState(false);
   const [pendingWindow, setPendingWindow] = useState<{
@@ -728,31 +750,76 @@ export default function GridDenahScreen() {
   const [windowType, setWindowType] = useState<WindowType>("sliding");
   const [windowSwing, setWindowSwing] = useState<"in" | "out">("out");
   const [windowHinge, setWindowHinge] = useState<"left" | "right">("left");
+  const [windowWidth, setWindowWidth] = useState("1.2");
 
   const [renameWallModalVisible, setRenameWallModalVisible] = useState(false);
   const [renameWallValue, setRenameWallValue] = useState("");
+
+    const handleDoorWidthChange = (delta: number) => {
+      const current = parseFloat(doorWidth) || 0.8;
+      const next = Math.max(0.1, Math.min(5, current + delta)); // min 0.1m, max 5m
+      setDoorWidth(next.toFixed(1));
+    };
+
+    const handleWindowWidthChange = (delta: number) => {
+      const current = parseFloat(windowWidth) || 1.2;
+      const next = Math.max(0.1, Math.min(5, current + delta)); // min 0.1m, max 5m
+      setWindowWidth(next.toFixed(1));
+    };
+  // ============================================
+  // HISTORY STATE
+  // ============================================
+  const [history, setHistory] = useState<HistorySnapshot[]>([
+    { rooms: [], walls: [], areas: [] },
+  ]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const historyRef = useRef<HistorySnapshot[]>(history);
+  const historyIndexRef = useRef(0);
+  const isRestoringRef = useRef(false);
+
+  useEffect(() => {
+    historyRef.current = history;
+  }, [history]);
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
 
   // ============================================
   // SCALE ADAPTIF
   // ============================================
   const [scale, setScale] = useState(20);
   const scaleRef = useRef(scale);
+  const lastAutoFitKeyRef = useRef<string>("");
 
   useEffect(() => {
+    const contentW = Math.max(panjangLahan, 1);
+    const contentH = Math.max(tinggiLahan, 1);
+    const key = `${contentW.toFixed(1)}x${contentH.toFixed(1)}-${isBebasBelumDigambar ? "free" : "fixed"}`;
+
+    if (isBebasBelumDigambar && lahanDraft.length === 0) {
+      return;
+    }
+    if (lastAutoFitKeyRef.current === key) return;
+
     const availableW = screenW - PADDING_X * 2;
     const availableH = screenH - 380;
-
-    const scaleByW = availableW / Math.max(panjangLahan, 1);
-    const scaleByH = availableH / Math.max(tinggiLahan, 1);
+    const scaleByW = availableW / contentW;
+    const scaleByH = availableH / contentH;
     const newScale = Math.max(
       MIN_SCALE,
       Math.min(MAX_SCALE, Math.min(scaleByW, scaleByH)),
     );
     setScale(newScale);
     scaleRef.current = newScale;
-  }, [panjangLahan, tinggiLahan, screenW, screenH]);
-
-  const mToPx = useCallback((m: number) => m * scale, [scale]);
+    lastAutoFitKeyRef.current = key;
+  }, [
+    panjangLahan,
+    tinggiLahan,
+    screenW,
+    screenH,
+    isBebasBelumDigambar,
+    lahanDraft.length,
+  ]);
 
   // ============================================
   // REFS
@@ -771,6 +838,9 @@ export default function GridDenahScreen() {
   const lahanPolygonRef = useRef(lahanPolygon);
   const lahanDraftRef = useRef(lahanDraft);
   const bboxRef = useRef(effectiveBBox);
+  const selectedRoomIdRef = useRef(selectedRoomId);
+  const selectedWallIdRef = useRef(selectedWallId);
+  const selectedAreaIdRef = useRef(selectedAreaId);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -802,6 +872,100 @@ export default function GridDenahScreen() {
   useEffect(() => {
     bboxRef.current = effectiveBBox;
   }, [effectiveBBox]);
+  useEffect(() => {
+    selectedRoomIdRef.current = selectedRoomId;
+  }, [selectedRoomId]);
+  useEffect(() => {
+    selectedWallIdRef.current = selectedWallId;
+  }, [selectedWallId]);
+  useEffect(() => {
+    selectedAreaIdRef.current = selectedAreaId;
+  }, [selectedAreaId]);
+
+  // ============================================
+  // COMMIT + HISTORY
+  // ============================================
+  const commitAll = useCallback(
+    (nextRooms: PlacedRoom[], nextWalls: Wall[], nextAreas: PlacedArea[]) => {
+      setPlacedRooms(nextRooms);
+      setWalls(nextWalls);
+      setPlacedAreas(nextAreas);
+
+      if (isRestoringRef.current) return;
+
+      const prev = historyRef.current;
+      const idx = historyIndexRef.current;
+      const truncated = prev.slice(0, idx + 1);
+      const snapshot: HistorySnapshot = {
+        rooms: nextRooms,
+        walls: nextWalls,
+        areas: nextAreas,
+      };
+      const last = truncated[truncated.length - 1];
+      const isSame =
+        last &&
+        last.rooms === snapshot.rooms &&
+        last.walls === snapshot.walls &&
+        last.areas === snapshot.areas;
+      if (isSame) return;
+
+      let newHistory = [...truncated, snapshot];
+      let newIndex = newHistory.length - 1;
+      if (newHistory.length > MAX_HISTORY) {
+        newHistory = newHistory.slice(newHistory.length - MAX_HISTORY);
+        newIndex = newHistory.length - 1;
+      }
+      setHistory(newHistory);
+      setHistoryIndex(newIndex);
+    },
+    [],
+  );
+
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < history.length - 1;
+
+  const applySnapshot = useCallback((snap: HistorySnapshot) => {
+    isRestoringRef.current = true;
+    setPlacedRooms(snap.rooms);
+    setWalls(snap.walls);
+    setPlacedAreas(snap.areas);
+    setTimeout(() => {
+      isRestoringRef.current = false;
+    }, 0);
+    setSelectedRoomId(null);
+    setSelectedWallId(null);
+    setSelectedAreaId(null);
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    const idx = historyIndexRef.current;
+    if (idx <= 0) return;
+    const newIdx = idx - 1;
+    const snap = historyRef.current[newIdx];
+    if (!snap) return;
+    setHistoryIndex(newIdx);
+    applySnapshot(snap);
+  }, [applySnapshot]);
+
+  const handleRedo = useCallback(() => {
+    const idx = historyIndexRef.current;
+    const len = historyRef.current.length;
+    if (idx >= len - 1) return;
+    const newIdx = idx + 1;
+    const snap = historyRef.current[newIdx];
+    if (!snap) return;
+    setHistoryIndex(newIdx);
+    applySnapshot(snap);
+  }, [applySnapshot]);
+
+  useEffect(() => {
+    isRestoringRef.current = false;
+    const initial: HistorySnapshot = { rooms: [], walls: [], areas: [] };
+    setHistory([initial]);
+    setHistoryIndex(0);
+    historyRef.current = [initial];
+    historyIndexRef.current = 0;
+  }, [panjangLahan, tinggiLahan]);
 
   // ============================================
   // DERIVED
@@ -841,22 +1005,21 @@ export default function GridDenahScreen() {
   );
 
   // ============================================
-  // CANVAS DIMENSION & OFFSET — FULL LAYAR + CENTER
+  // CANVAS DIMENSION & OFFSET
   // ============================================
   const canvasW = useMemo(() => screenW, [screenW]);
   const canvasH = useMemo(() => Math.max(screenH - 380, 300), [screenH]);
 
   const offsetX = useMemo(() => {
     const contentW = panjangLahan * scale;
-    return Math.max((canvasW - contentW) / 2, 0);
+    return (canvasW - contentW) / 2;
   }, [canvasW, panjangLahan, scale]);
 
   const offsetY = useMemo(() => {
     const contentH = tinggiLahan * scale;
-    return Math.max((canvasH - contentH) / 2, 0);
+    return (canvasH - contentH) / 2;
   }, [canvasH, tinggiLahan, scale]);
 
-  // Reset canvasScale saat ukuran lahan berubah
   useEffect(() => {
     setCanvasScale(1);
     setCanvasTranslate({ x: 0, y: 0 });
@@ -865,7 +1028,7 @@ export default function GridDenahScreen() {
   }, [panjangLahan, tinggiLahan]);
 
   // ============================================
-  // SCREEN → METER (reverse transform dengan pivot center)
+  // SCREEN → METER
   // ============================================
   const screenToMeter = useCallback(
     (screenX: number, screenY: number) => {
@@ -903,12 +1066,12 @@ export default function GridDenahScreen() {
       const rooms = roomsRef.current;
       const allWalls = wallsRef.current;
       const areas = areasRef.current;
-      const bboxNow = bboxRef.current;
 
       // ============ MODE DRAW-LAHAN ============
       if (m === "draw-lahan") {
-        const sx = Math.max(bboxNow.minX, Math.min(bboxNow.maxX, snapGrid(mx)));
-        const sy = Math.max(bboxNow.minY, Math.min(bboxNow.maxY, snapGrid(my)));
+        // ✅ Snap 1m. Titik negatif diizinkan (bisa geser ke kiri/atas).
+        const sx = snapGrid(mx);
+        const sy = snapGrid(my);
         const draft = lahanDraftRef.current;
 
         if (draft.length >= 3) {
@@ -977,25 +1140,24 @@ export default function GridDenahScreen() {
               text: "Hapus Area",
               style: "destructive",
               onPress: () => {
-                setPlacedAreas((prev) =>
-                  prev.filter((a) => a.id !== areaFound.id),
+                const nextAreas = areasRef.current.filter(
+                  (a) => a.id !== areaFound.id,
                 );
-                if (selectedAreaId === areaFound.id) setSelectedAreaId(null);
+                commitAll(roomsRef.current, wallsRef.current, nextAreas);
+                if (selectedAreaIdRef.current === areaFound.id)
+                  setSelectedAreaId(null);
               },
             },
           ]);
           return;
         }
 
-        const DOOR_WIDTH_METER = 0.8;
-        const WINDOW_WIDTH_METER = 1.2;
-
         for (const room of rooms) {
           for (let i = 0; i < room.doors.length; i++) {
             const door = room.doors[i];
             const center = getDoorCenterMeter(room, door);
-            const side1 = getDoorSideMeter(room, door, -DOOR_WIDTH_METER / 2);
-            const side2 = getDoorSideMeter(room, door, DOOR_WIDTH_METER / 2);
+            const side1 = getDoorSideMeter(room, door, -door.width / 2);
+            const side2 = getDoorSideMeter(room, door, door.width / 2);
             const minDist = Math.min(
               Math.hypot(mx - center.x, my - center.y),
               Math.hypot(mx - side1.x, my - side1.y),
@@ -1008,13 +1170,15 @@ export default function GridDenahScreen() {
                   text: "Hapus Pintu",
                   style: "destructive",
                   onPress: () => {
-                    setPlacedRooms((prev) =>
-                      prev.map((r) =>
-                        r.id === room.id
-                          ? { ...r, doors: r.doors.filter((_, di) => di !== i) }
-                          : r,
-                      ),
+                    const nextRooms = roomsRef.current.map((r) =>
+                      r.id === room.id
+                        ? {
+                            ...r,
+                            doors: r.doors.filter((_, di) => di !== i),
+                          }
+                        : r,
                     );
+                    commitAll(nextRooms, wallsRef.current, areasRef.current);
                   },
                 },
               ]);
@@ -1027,12 +1191,8 @@ export default function GridDenahScreen() {
           for (let i = 0; i < room.windows.length; i++) {
             const win = room.windows[i];
             const center = getWindowCenterMeter(room, win);
-            const side1 = getWindowSideMeter(
-              room,
-              win,
-              -WINDOW_WIDTH_METER / 2,
-            );
-            const side2 = getWindowSideMeter(room, win, WINDOW_WIDTH_METER / 2);
+            const side1 = getWindowSideMeter(room, win, -win.width / 2);
+            const side2 = getWindowSideMeter(room, win, win.width / 2);
             const minDist = Math.min(
               Math.hypot(mx - center.x, my - center.y),
               Math.hypot(mx - side1.x, my - side1.y),
@@ -1048,16 +1208,15 @@ export default function GridDenahScreen() {
                     text: "Hapus Jendela",
                     style: "destructive",
                     onPress: () => {
-                      setPlacedRooms((prev) =>
-                        prev.map((r) =>
-                          r.id === room.id
-                            ? {
-                                ...r,
-                                windows: r.windows.filter((_, wi) => wi !== i),
-                              }
-                            : r,
-                        ),
+                      const nextRooms = roomsRef.current.map((r) =>
+                        r.id === room.id
+                          ? {
+                              ...r,
+                              windows: r.windows.filter((_, wi) => wi !== i),
+                            }
+                          : r,
                       );
+                      commitAll(nextRooms, wallsRef.current, areasRef.current);
                     },
                   },
                 ],
@@ -1071,16 +1230,8 @@ export default function GridDenahScreen() {
           for (let i = 0; i < wall.doors.length; i++) {
             const door = wall.doors[i];
             const center = getWallDoorCenterMeter(wall, door);
-            const side1 = getWallDoorSideMeter(
-              wall,
-              door,
-              -DOOR_WIDTH_METER / 2,
-            );
-            const side2 = getWallDoorSideMeter(
-              wall,
-              door,
-              DOOR_WIDTH_METER / 2,
-            );
+            const side1 = getWallDoorSideMeter(wall, door, -door.width / 2);
+            const side2 = getWallDoorSideMeter(wall, door, door.width / 2);
             const minDist = Math.min(
               Math.hypot(mx - center.x, my - center.y),
               Math.hypot(mx - side1.x, my - side1.y),
@@ -1096,16 +1247,15 @@ export default function GridDenahScreen() {
                     text: "Hapus Pintu",
                     style: "destructive",
                     onPress: () => {
-                      setWalls((prev) =>
-                        prev.map((w) =>
-                          w.id === wall.id
-                            ? {
-                                ...w,
-                                doors: w.doors.filter((_, di) => di !== i),
-                              }
-                            : w,
-                        ),
+                      const nextWalls = wallsRef.current.map((w) =>
+                        w.id === wall.id
+                          ? {
+                              ...w,
+                              doors: w.doors.filter((_, di) => di !== i),
+                            }
+                          : w,
                       );
+                      commitAll(roomsRef.current, nextWalls, areasRef.current);
                     },
                   },
                 ],
@@ -1116,16 +1266,8 @@ export default function GridDenahScreen() {
           for (let i = 0; i < wall.windows.length; i++) {
             const win = wall.windows[i];
             const center = getWallWindowCenterMeter(wall, win);
-            const side1 = getWallWindowSideMeter(
-              wall,
-              win,
-              -WINDOW_WIDTH_METER / 2,
-            );
-            const side2 = getWallWindowSideMeter(
-              wall,
-              win,
-              WINDOW_WIDTH_METER / 2,
-            );
+            const side1 = getWallWindowSideMeter(wall, win, -win.width / 2);
+            const side2 = getWallWindowSideMeter(wall, win, win.width / 2);
             const minDist = Math.min(
               Math.hypot(mx - center.x, my - center.y),
               Math.hypot(mx - side1.x, my - side1.y),
@@ -1138,16 +1280,15 @@ export default function GridDenahScreen() {
                   text: "Hapus Jendela",
                   style: "destructive",
                   onPress: () => {
-                    setWalls((prev) =>
-                      prev.map((w) =>
-                        w.id === wall.id
-                          ? {
-                              ...w,
-                              windows: w.windows.filter((_, wi) => wi !== i),
-                            }
-                          : w,
-                      ),
+                    const nextWalls = wallsRef.current.map((w) =>
+                      w.id === wall.id
+                        ? {
+                            ...w,
+                            windows: w.windows.filter((_, wi) => wi !== i),
+                          }
+                        : w,
                     );
+                    commitAll(roomsRef.current, nextWalls, areasRef.current);
                   },
                 },
               ]);
@@ -1167,7 +1308,10 @@ export default function GridDenahScreen() {
                 text: "Hapus",
                 style: "destructive",
                 onPress: () => {
-                  setWalls((prev) => prev.filter((wall) => wall.id !== w.id));
+                  const nextWalls = wallsRef.current.filter(
+                    (wall) => wall.id !== w.id,
+                  );
+                  commitAll(roomsRef.current, nextWalls, areasRef.current);
                 },
               },
             ]);
@@ -1189,8 +1333,12 @@ export default function GridDenahScreen() {
               text: "Hapus Ruangan",
               style: "destructive",
               onPress: () => {
-                setPlacedRooms((prev) => prev.filter((r) => r.id !== found.id));
-                if (selectedRoomId === found.id) setSelectedRoomId(null);
+                const nextRooms = roomsRef.current.filter(
+                  (r) => r.id !== found.id,
+                );
+                commitAll(nextRooms, wallsRef.current, areasRef.current);
+                if (selectedRoomIdRef.current === found.id)
+                  setSelectedRoomId(null);
               },
             },
           ]);
@@ -1323,7 +1471,7 @@ export default function GridDenahScreen() {
     .runOnJS(true);
 
   // ============================================
-  // GESTURE: PAN DRAW (RUANGAN & DINDING)
+  // GESTURE: PAN DRAW
   // ============================================
   const panDrawGesture = Gesture.Pan()
     .minDistance(8)
@@ -1365,6 +1513,7 @@ export default function GridDenahScreen() {
     .onEnd(() => {
       const m = modeRef.current;
 
+      // ============ RUANGAN ============
       if (m === "draw-room") {
         const start = drawStartRef.current;
         const end = drawEndRef.current;
@@ -1373,16 +1522,36 @@ export default function GridDenahScreen() {
         drawStartRef.current = null;
         drawEndRef.current = null;
         if (!start || !end) return;
-        const minX = Math.min(start.x, end.x);
-        const maxX = Math.max(start.x, end.x);
-        const minY = Math.min(start.y, end.y);
-        const maxY = Math.max(start.y, end.y);
+
+        let minX = Math.min(start.x, end.x);
+        let maxX = Math.max(start.x, end.x);
+        let minY = Math.min(start.y, end.y);
+        let maxY = Math.max(start.y, end.y);
+
+        const poly = lahanPolygonRef.current;
+
+        if (poly && poly.length >= 3) {
+          const xs = poly.map((p) => p.x);
+          const ys = poly.map((p) => p.y);
+          const polyMinX = Math.min(...xs);
+          const polyMaxX = Math.max(...xs);
+          const polyMinY = Math.min(...ys);
+          const polyMaxY = Math.max(...ys);
+
+          minX = Math.max(minX, polyMinX);
+          maxX = Math.min(maxX, polyMaxX);
+          minY = Math.max(minY, polyMinY);
+          maxY = Math.min(maxY, polyMaxY);
+        }
+
         const panjang = maxX - minX;
         const lebar = maxY - minY;
+
         if (panjang < 1 || lebar < 1) {
           Alert.alert("Terlalu Kecil", "Gambar minimal 1×1 meter.");
           return;
         }
+
         const rt = selectedRoomTypeRef.current;
         const newRoom: PlacedRoom = {
           id: `room-${Date.now()}-${Math.random()}`,
@@ -1396,12 +1565,11 @@ export default function GridDenahScreen() {
           windows: [],
         };
 
-        const poly = lahanPolygonRef.current;
         if (poly && poly.length >= 3) {
-          if (!isRoomInsidePolygon(newRoom, poly)) {
+          if (!isRoomInsidePolygon(newRoom, poly, 0.15)) {
             Alert.alert(
               "Keluar Batas Lahan",
-              "Ruangan ini keluar dari batas lahan.",
+              "Ruangan ini keluar dari batas lahan. Pastikan seluruh badan ruangan berada di dalam area lahan.",
             );
             return;
           }
@@ -1417,11 +1585,14 @@ export default function GridDenahScreen() {
           Alert.alert("Luas Melebihi", "Total melebihi luas lahan.");
           return;
         }
-        setPlacedRooms((prev) => [...prev, newRoom]);
+
+        const nextRooms = [...rooms, newRoom];
+        commitAll(nextRooms, wallsRef.current, areasRef.current);
         setSelectedRoomId(newRoom.id);
         return;
       }
 
+      // ============ DINDING MANUAL ============
       if (m === "draw-wall") {
         const start = wallStartRef.current;
         const end = wallEndRef.current;
@@ -1442,35 +1613,59 @@ export default function GridDenahScreen() {
         else finalEnd.x = start.x;
 
         const poly = lahanPolygonRef.current;
+        let finalStart = { ...start };
+
         if (poly && poly.length >= 3) {
-          const startInside = isPointInPolygon(start.x, start.y, poly);
-          const endInside = isPointInPolygon(finalEnd.x, finalEnd.y, poly);
-          if (!startInside || !endInside) {
-            Alert.alert("Keluar Batas Lahan", "Dinding ini keluar dari lahan.");
-            return;
-          }
-          if (
-            doWallCrossPolygon(start.x, start.y, finalEnd.x, finalEnd.y, poly)
-          ) {
-            Alert.alert(
-              "Melewati Batas Lahan",
-              "Dinding melewati batas lahan.",
-            );
-            return;
+          const isHorizontal = Math.abs(finalEnd.y - finalStart.y) < 0.001;
+          const isVertical = Math.abs(finalEnd.x - finalStart.x) < 0.001;
+
+          if (isHorizontal) {
+            const y = finalStart.y;
+            const minX = Math.min(finalStart.x, finalEnd.x);
+            const maxX = Math.max(finalStart.x, finalEnd.x);
+            const segs = clipLineToPolygon(minX, y, maxX, y, poly);
+            if (segs.length > 0) {
+              finalStart.x = segs[0].x1;
+              finalEnd.x = segs[segs.length - 1].x2;
+              finalStart.y = finalEnd.y = y;
+            } else {
+              Alert.alert(
+                "Melewati Batas Lahan",
+                "Dinding berada di luar lahan.",
+              );
+              return;
+            }
+          } else if (isVertical) {
+            const x = finalStart.x;
+            const minY = Math.min(finalStart.y, finalEnd.y);
+            const maxY = Math.max(finalStart.y, finalEnd.y);
+            const segs = clipLineToPolygon(x, minY, x, maxY, poly);
+            if (segs.length > 0) {
+              finalStart.y = segs[0].y1;
+              finalEnd.y = segs[segs.length - 1].y2;
+              finalStart.x = finalEnd.x = x;
+            } else {
+              Alert.alert(
+                "Melewati Batas Lahan",
+                "Dinding berada di luar lahan.",
+              );
+              return;
+            }
           }
         }
 
         const newWall: Wall = {
           id: `wall-${Date.now()}-${Math.random()}`,
-          x1: start.x,
-          y1: start.y,
+          x1: finalStart.x,
+          y1: finalStart.y,
           x2: finalEnd.x,
           y2: finalEnd.y,
           nama: "",
           doors: [],
           windows: [],
         };
-        setWalls((prev) => [...prev, newWall]);
+        const nextWalls = [...wallsRef.current, newWall];
+        commitAll(roomsRef.current, nextWalls, areasRef.current);
         return;
       }
     })
@@ -1498,8 +1693,8 @@ export default function GridDenahScreen() {
     })
     .onUpdate((e) => {
       const newScale = Math.max(
-        0.3,
-        Math.min(3, savedCanvasScale.current * e.scale),
+        MIN_CANVAS_SCALE,
+        Math.min(MAX_CANVAS_SCALE, savedCanvasScale.current * e.scale),
       );
       setCanvasScale(newScale);
     })
@@ -1543,20 +1738,20 @@ export default function GridDenahScreen() {
   // ============================================
   const handleResize = (dPanjang: number, dLebar: number) => {
     if (!selectedRoomId) return;
-    setPlacedRooms((prev) =>
-      prev.map((r) => {
-        if (r.id !== selectedRoomId) return r;
-        const newP = Math.max(1, r.panjang + dPanjang);
-        const newL = Math.max(1, r.lebar + dLebar);
-        const merged = { ...r, panjang: newP, lebar: newL };
-        if (cekOverlap(merged, prev, r.id)) return r;
-        const poly = lahanPolygonRef.current;
-        if (poly && poly.length >= 3) {
-          if (!isRoomInsidePolygon(merged, poly)) return r;
-        }
-        return merged;
-      }),
-    );
+    const rooms = roomsRef.current;
+    const nextRooms = rooms.map((r) => {
+      if (r.id !== selectedRoomId) return r;
+      const newP = Math.max(1, r.panjang + dPanjang);
+      const newL = Math.max(1, r.lebar + dLebar);
+      const merged = { ...r, panjang: newP, lebar: newL };
+      if (cekOverlap(merged, rooms, r.id)) return r;
+      const poly = lahanPolygonRef.current;
+      if (poly && poly.length >= 3) {
+        if (!isRoomInsidePolygon(merged, poly, 0.15)) return r;
+      }
+      return merged;
+    });
+    commitAll(nextRooms, wallsRef.current, areasRef.current);
   };
 
   // ============================================
@@ -1570,7 +1765,10 @@ export default function GridDenahScreen() {
         text: "Hapus",
         style: "destructive",
         onPress: () => {
-          setPlacedRooms((prev) => prev.filter((r) => r.id !== selectedRoomId));
+          const nextRooms = roomsRef.current.filter(
+            (r) => r.id !== selectedRoomId,
+          );
+          commitAll(nextRooms, wallsRef.current, areasRef.current);
           setSelectedRoomId(null);
         },
       },
@@ -1585,7 +1783,10 @@ export default function GridDenahScreen() {
         text: "Hapus",
         style: "destructive",
         onPress: () => {
-          setWalls((prev) => prev.filter((w) => w.id !== selectedWallId));
+          const nextWalls = wallsRef.current.filter(
+            (w) => w.id !== selectedWallId,
+          );
+          commitAll(roomsRef.current, nextWalls, areasRef.current);
           setSelectedWallId(null);
         },
       },
@@ -1594,11 +1795,10 @@ export default function GridDenahScreen() {
 
   const handleClearElements = () => {
     if (!selectedRoomId) return;
-    setPlacedRooms((prev) =>
-      prev.map((r) =>
-        r.id === selectedRoomId ? { ...r, doors: [], windows: [] } : r,
-      ),
+    const nextRooms = roomsRef.current.map((r) =>
+      r.id === selectedRoomId ? { ...r, doors: [], windows: [] } : r,
     );
+    commitAll(nextRooms, wallsRef.current, areasRef.current);
   };
 
   const handleResetCanvas = () => {
@@ -1618,9 +1818,7 @@ export default function GridDenahScreen() {
           text: "Hapus Semua",
           style: "destructive",
           onPress: () => {
-            setPlacedRooms([]);
-            setWalls([]);
-            setPlacedAreas([]);
+            commitAll([], [], []);
             setSelectedRoomId(null);
             setSelectedWallId(null);
             setSelectedAreaId(null);
@@ -1650,7 +1848,8 @@ export default function GridDenahScreen() {
       centerX: pendingArea.centerX,
       centerY: pendingArea.centerY,
     };
-    setPlacedAreas((prev) => [...prev, newArea]);
+    const nextAreas = [...areasRef.current, newArea];
+    commitAll(roomsRef.current, wallsRef.current, nextAreas);
     setAreaModalVisible(false);
     setPendingArea(null);
     setAreaValue("");
@@ -1674,7 +1873,10 @@ export default function GridDenahScreen() {
         text: "Hapus",
         style: "destructive",
         onPress: () => {
-          setPlacedAreas((prev) => prev.filter((a) => a.id !== selectedAreaId));
+          const nextAreas = areasRef.current.filter(
+            (a) => a.id !== selectedAreaId,
+          );
+          commitAll(roomsRef.current, wallsRef.current, nextAreas);
           setSelectedAreaId(null);
         },
       },
@@ -1711,9 +1913,10 @@ export default function GridDenahScreen() {
   const handleRenameWall = () => {
     if (!selectedWallId) return;
     const trimmed = renameWallValue.trim();
-    setWalls((prev) =>
-      prev.map((w) => (w.id === selectedWallId ? { ...w, nama: trimmed } : w)),
+    const nextWalls = wallsRef.current.map((w) =>
+      w.id === selectedWallId ? { ...w, nama: trimmed } : w,
     );
+    commitAll(roomsRef.current, nextWalls, areasRef.current);
     setRenameWallModalVisible(false);
     setRenameWallValue("");
   };
@@ -1728,44 +1931,34 @@ export default function GridDenahScreen() {
   // ============================================
   const handleConfirmDoor = () => {
     if (!pendingDoor) return;
+    const w = parseFloat(doorWidth) || 0.8;
+    if (w <= 0) {
+      Alert.alert("Lebar Tidak Valid", "Lebar pintu harus > 0.");
+      return;
+    }
+
+    const newDoor: Door = {
+      edge: pendingDoor.edge,
+      position: pendingDoor.position,
+      swingDirection: doorSwing,
+      hingeSide: doorHinge,
+      width: w,
+    };
+
     if (pendingDoor.targetType === "room") {
-      setPlacedRooms((prev) =>
-        prev.map((r) =>
-          r.id === pendingDoor.targetId
-            ? {
-                ...r,
-                doors: [
-                  ...r.doors,
-                  {
-                    edge: pendingDoor.edge,
-                    position: pendingDoor.position,
-                    swingDirection: doorSwing,
-                    hingeSide: doorHinge,
-                  },
-                ],
-              }
-            : r,
-        ),
+      const nextRooms = roomsRef.current.map((r) =>
+        r.id === pendingDoor.targetId
+          ? { ...r, doors: [...r.doors, newDoor] }
+          : r,
       );
+      commitAll(nextRooms, wallsRef.current, areasRef.current);
     } else {
-      setWalls((prev) =>
-        prev.map((w) =>
-          w.id === pendingDoor.targetId
-            ? {
-                ...w,
-                doors: [
-                  ...w.doors,
-                  {
-                    edge: pendingDoor.edge,
-                    position: pendingDoor.position,
-                    swingDirection: doorSwing,
-                    hingeSide: doorHinge,
-                  },
-                ],
-              }
-            : w,
-        ),
+      const nextWalls = wallsRef.current.map((wall) =>
+        wall.id === pendingDoor.targetId
+          ? { ...wall, doors: [...wall.doors, newDoor] }
+          : wall,
       );
+      commitAll(roomsRef.current, nextWalls, areasRef.current);
     }
     setDoorModalVisible(false);
     setPendingDoor(null);
@@ -1780,49 +1973,37 @@ export default function GridDenahScreen() {
 
   const handleConfirmWindow = () => {
     if (!pendingWindow) return;
+    const w = parseFloat(windowWidth) || 1.2;
+    if (w <= 0) {
+      Alert.alert("Lebar Tidak Valid", "Lebar jendela harus > 0.");
+      return;
+    }
+
     const needsSwing = windowType === "casement" || windowType === "awning";
+    const newWin: Window = {
+      edge: pendingWindow.edge,
+      position: pendingWindow.position,
+      type: windowType,
+      width: w,
+      ...(needsSwing
+        ? { swingDirection: windowSwing, hingeSide: windowHinge }
+        : {}),
+    };
+
     if (pendingWindow.targetType === "room") {
-      setPlacedRooms((prev) =>
-        prev.map((r) =>
-          r.id === pendingWindow.targetId
-            ? {
-                ...r,
-                windows: [
-                  ...r.windows,
-                  {
-                    edge: pendingWindow.edge,
-                    position: pendingWindow.position,
-                    type: windowType,
-                    ...(needsSwing
-                      ? { swingDirection: windowSwing, hingeSide: windowHinge }
-                      : {}),
-                  },
-                ],
-              }
-            : r,
-        ),
+      const nextRooms = roomsRef.current.map((r) =>
+        r.id === pendingWindow.targetId
+          ? { ...r, windows: [...r.windows, newWin] }
+          : r,
       );
+      commitAll(nextRooms, wallsRef.current, areasRef.current);
     } else {
-      setWalls((prev) =>
-        prev.map((w) =>
-          w.id === pendingWindow.targetId
-            ? {
-                ...w,
-                windows: [
-                  ...w.windows,
-                  {
-                    edge: pendingWindow.edge,
-                    position: pendingWindow.position,
-                    type: windowType,
-                    ...(needsSwing
-                      ? { swingDirection: windowSwing, hingeSide: windowHinge }
-                      : {}),
-                  },
-                ],
-              }
-            : w,
-        ),
+      const nextWalls = wallsRef.current.map((wall) =>
+        wall.id === pendingWindow.targetId
+          ? { ...wall, windows: [...wall.windows, newWin] }
+          : wall,
       );
+      commitAll(roomsRef.current, nextWalls, areasRef.current);
     }
     setWindowModalVisible(false);
     setPendingWindow(null);
@@ -1944,97 +2125,112 @@ export default function GridDenahScreen() {
   };
 
   // ============================================
-  // GRID LINES
+  // ✅ GRID LINES: SELALU 1m PER KOTAK
   // ============================================
-   const gridLines = useMemo(() => {
-     const lines: {
-       x1: number;
-       y1: number;
-       x2: number;
-       y2: number;
-       thick: boolean;
-       label?: string;
-     }[] = [];
+  const gridLines = useMemo(() => {
+    const lines: {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      thick: boolean;
+    }[] = [];
 
-     // ✅ Grid SELALU dimunculkan (termasuk saat mode gambar lahan bebas)
-     const bb = effectiveBBox;
-     const startX = Math.floor(bb.minX);
-     const endX = Math.ceil(bb.maxX);
-     const startY = Math.floor(bb.minY);
-     const endY = Math.ceil(bb.maxY);
+    const bb = effectiveBBox;
+    const startX = Math.floor(bb.minX);
+    const endX = Math.ceil(bb.maxX);
+    const startY = Math.floor(bb.minY);
+    const endY = Math.ceil(bb.maxY);
 
-     // Saat mode gambar lahan bebas, paksa grid kotak penuh (karena belum ada polygon)
-     if (isBebasBelumDigambar || dataLahan.bentuk === "kotak") {
-       for (let x = startX; x <= endX; x++) {
-         const px = (x - bb.minX) * scale;
-         lines.push({
-           x1: px,
-           y1: (startY - bb.minY) * scale,
-           x2: px,
-           y2: (endY - bb.minY) * scale,
-           thick: x % 5 === 0,
-         });
-       }
-       for (let y = startY; y <= endY; y++) {
-         const py = (y - bb.minY) * scale;
-         lines.push({
-           x1: (startX - bb.minX) * scale,
-           y1: py,
-           x2: (endX - bb.minX) * scale,
-           y2: py,
-           thick: y % 5 === 0,
-         });
-       }
-       return lines;
-     }
+    // Selalu 1m per garis. Jika zoom-out terlalu jauh (scale < 6),
+    // hanya garis major (kelipatan 5m) yang digambar agar tidak freeze.
+    const showMinor = scale >= MIN_SCALE_SHOW_MINOR;
+    const totalX = endX - startX + 1;
+    const totalY = endY - startY + 1;
+    const forceOnlyMajor =
+      totalX * totalY > MAX_TOTAL_GRID_LINES * 2 ||
+      totalX > MAX_TOTAL_GRID_LINES ||
+      totalY > MAX_TOTAL_GRID_LINES;
+    const drawMinor = showMinor && !forceOnlyMajor;
 
-     // MODE POLYGON: clip grid ke polygon
-     if (lahanPolygon && lahanPolygon.length >= 3) {
-       for (let x = startX; x <= endX; x++) {
-         const segs = clipLineToPolygon(
-           x,
-           bb.minY - 1,
-           x,
-           bb.maxY + 1,
-           lahanPolygon,
-         );
-         for (const s of segs) {
-           lines.push({
-             x1: (s.x1 - bb.minX) * scale,
-             y1: (s.y1 - bb.minY) * scale,
-             x2: (s.x2 - bb.minX) * scale,
-             y2: (s.y2 - bb.minY) * scale,
-             thick: x % 5 === 0,
-           });
-         }
-       }
-       for (let y = startY; y <= endY; y++) {
-         const segs = clipLineToPolygon(
-           bb.minX - 1,
-           y,
-           bb.maxX + 1,
-           y,
-           lahanPolygon,
-         );
-         for (const s of segs) {
-           lines.push({
-             x1: (s.x1 - bb.minX) * scale,
-             y1: (s.y1 - bb.minY) * scale,
-             x2: (s.x2 - bb.minX) * scale,
-             y2: (s.y2 - bb.minY) * scale,
-             thick: y % 5 === 0,
-           });
-         }
-       }
-     }
-     return lines;
-   }, [
-     effectiveBBox,
-     dataLahan.bentuk,
-     lahanPolygon,
-     scale,
-     isBebasBelumDigambar,
-   ]);
+    if (isBebasBelumDigambar || dataLahan.bentuk === "kotak") {
+      for (let x = startX; x <= endX; x++) {
+        const isMajor = x % 5 === 0;
+        if (!drawMinor && !isMajor) continue;
+        const px = (x - bb.minX) * scale;
+        lines.push({
+          x1: px,
+          y1: (startY - bb.minY) * scale,
+          x2: px,
+          y2: (endY - bb.minY) * scale,
+          thick: isMajor,
+        });
+      }
+      for (let y = startY; y <= endY; y++) {
+        const isMajor = y % 5 === 0;
+        if (!drawMinor && !isMajor) continue;
+        const py = (y - bb.minY) * scale;
+        lines.push({
+          x1: (startX - bb.minX) * scale,
+          y1: py,
+          x2: (endX - bb.minX) * scale,
+          y2: py,
+          thick: isMajor,
+        });
+      }
+      return lines;
+    }
+
+    if (lahanPolygon && lahanPolygon.length >= 3) {
+      for (let x = startX; x <= endX; x++) {
+        const isMajor = x % 5 === 0;
+        if (!drawMinor && !isMajor) continue;
+        const segs = clipLineToPolygon(
+          x,
+          bb.minY - 1,
+          x,
+          bb.maxY + 1,
+          lahanPolygon,
+        );
+        for (const s of segs) {
+          lines.push({
+            x1: (s.x1 - bb.minX) * scale,
+            y1: (s.y1 - bb.minY) * scale,
+            x2: (s.x2 - bb.minX) * scale,
+            y2: (s.y2 - bb.minY) * scale,
+            thick: isMajor,
+          });
+        }
+      }
+      for (let y = startY; y <= endY; y++) {
+        const isMajor = y % 5 === 0;
+        if (!drawMinor && !isMajor) continue;
+        const segs = clipLineToPolygon(
+          bb.minX - 1,
+          y,
+          bb.maxX + 1,
+          y,
+          lahanPolygon,
+        );
+        for (const s of segs) {
+          lines.push({
+            x1: (s.x1 - bb.minX) * scale,
+            y1: (s.y1 - bb.minY) * scale,
+            x2: (s.x2 - bb.minX) * scale,
+            y2: (s.y2 - bb.minY) * scale,
+            thick: isMajor,
+          });
+        }
+      }
+    }
+    return lines;
+  }, [
+    effectiveBBox,
+    dataLahan.bentuk,
+    lahanPolygon,
+    scale,
+    isBebasBelumDigambar,
+  ]);
 
   const previewRect = useMemo(() => {
     if (!drawStart || !drawEnd) return null;
@@ -2063,6 +2259,57 @@ export default function GridDenahScreen() {
   }, [wallStart, wallEnd, effectiveBBox, scale]);
 
   // ============================================
+  // ✅ METER LABELS (SINKRON DENGAN GRID 1m)
+  // ============================================
+  const meterLabelsH = useMemo(() => {
+    const arr: React.ReactElement[] = [];
+    const bb = effectiveBBox;
+    const startI = Math.floor(bb.minX);
+    const endI = Math.ceil(bb.maxX);
+    const showMinor = scale >= MIN_SCALE_SHOW_MINOR;
+    for (let i = startI; i <= endI; i++) {
+      if (i === 0) continue;
+      const isMajor = i % 5 === 0;
+      if (!showMinor && !isMajor) continue;
+      const localX = offsetX + (i - bb.minX) * scale - 15;
+      const localY = offsetY - 22;
+      arr.push(
+        <View
+          key={`mx-${i}`}
+          style={[styles.meterLabelH, { left: localX, top: localY }]}
+        >
+          <Text style={styles.meterLabelText}>{`${i}m`}</Text>
+        </View>,
+      );
+    }
+    return arr;
+  }, [effectiveBBox, scale, offsetX, offsetY]);
+
+  const meterLabelsV = useMemo(() => {
+    const arr: React.ReactElement[] = [];
+    const bb = effectiveBBox;
+    const startI = Math.floor(bb.minY);
+    const endI = Math.ceil(bb.maxY);
+    const showMinor = scale >= MIN_SCALE_SHOW_MINOR;
+    for (let i = startI; i <= endI; i++) {
+      if (i === 0) continue;
+      const isMajor = i % 5 === 0;
+      if (!showMinor && !isMajor) continue;
+      const localX = offsetX - 38;
+      const localY = offsetY + (i - bb.minY) * scale - 8;
+      arr.push(
+        <View
+          key={`my-${i}`}
+          style={[styles.meterLabelV, { left: localX, top: localY }]}
+        >
+          <Text style={styles.meterLabelText}>{`${i}m`}</Text>
+        </View>,
+      );
+    }
+    return arr;
+  }, [effectiveBBox, scale, offsetX, offsetY]);
+
+  // ============================================
   // RENDER
   // ============================================
   return (
@@ -2083,6 +2330,22 @@ export default function GridDenahScreen() {
               : `Lahan ${panjangLahan.toFixed(1)}m × ${tinggiLahan.toFixed(1)}m • ${dataLahan.bentuk} • ${totalLuasLahan} m²`}
           </Text>
         </View>
+
+        <TouchableOpacity
+          style={[styles.headerBtn, !canUndo && { opacity: 0.3 }]}
+          onPress={handleUndo}
+          disabled={!canUndo}
+        >
+          <Ionicons name="arrow-undo" size={20} color="#0F172A" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.headerBtn, !canRedo && { opacity: 0.3 }]}
+          onPress={handleRedo}
+          disabled={!canRedo}
+        >
+          <Ionicons name="arrow-redo" size={20} color="#0F172A" />
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.headerBtn} onPress={handleClearAll}>
           <Ionicons name="trash" size={20} color="#DC2626" />
         </TouchableOpacity>
@@ -2114,7 +2377,7 @@ export default function GridDenahScreen() {
           <Ionicons name="construct" size={16} color="#7C2D12" />
           <Text style={styles.lahanBannerText}>
             {lahanDraft.length === 0
-              ? "Tap untuk mulai menggambar lahan"
+              ? "Tap untuk mulai menggambar lahan (bisa geser 2 jari)"
               : `${lahanDraft.length} titik • tap titik pertama untuk menutup`}
           </Text>
           <View style={styles.lahanBannerBtns}>
@@ -2252,7 +2515,7 @@ export default function GridDenahScreen() {
         <Ionicons name="information-circle" size={14} color="#92400E" />
         <Text style={styles.hintText}>
           {isBebasBelumDigambar
-            ? "Tap titik sudut lahan, tap titik pertama untuk menutup"
+            ? "Tap titik sudut lahan, tap titik pertama untuk menutup · 2 jari untuk geser"
             : mode === "draw-room"
               ? "Tap & drag 1 jari untuk gambar ruangan · 2 jari untuk geser/zoom"
               : mode === "draw-wall"
@@ -2269,9 +2532,7 @@ export default function GridDenahScreen() {
         </Text>
       </View>
 
-      {/* ============================================
-          CANVAS — BACKGROUND PUTIH FIX, KONTEN IKUT ZOOM/PAN
-          ============================================ */}
+      {/* CANVAS */}
       <View style={styles.canvasContainer}>
         <GestureDetector gesture={composed}>
           <View
@@ -2288,7 +2549,6 @@ export default function GridDenahScreen() {
                 backgroundColor: "#FFFFFF",
               }}
             >
-              {/* LAYER 1: BACKGROUND PUTIH (FIX) */}
               <Rect
                 x={0}
                 y={0}
@@ -2297,7 +2557,6 @@ export default function GridDenahScreen() {
                 color="#FFFFFF"
               />
 
-              {/* LAYER 2: KONTEN (IKUT ZOOM & PAN) */}
               <Group
                 transform={[
                   { translateX: canvasTranslate.x },
@@ -2345,7 +2604,7 @@ export default function GridDenahScreen() {
                     </>
                   )}
 
-                  {/* GRID */}
+                  {/* GRID 1m */}
                   {gridLines.map((l, i) => (
                     <Line
                       key={`g-${i}`}
@@ -2470,8 +2729,8 @@ export default function GridDenahScreen() {
                   {/* PINTU RUANGAN */}
                   {placedRooms.map((room) =>
                     room.doors.map((door, idx) => {
-                      const doorWidth = 0.8;
-                      const halfWidth = doorWidth / 2;
+                      const w = door.width || 0.8;
+                      const halfWidth = w / 2;
                       let px1 = 0,
                         py1 = 0,
                         px2 = 0,
@@ -2516,7 +2775,7 @@ export default function GridDenahScreen() {
                       const hingeY = door.hingeSide === "left" ? py1 : py2;
                       const otherX = door.hingeSide === "left" ? px2 : px1;
                       const otherY = door.hingeSide === "left" ? py2 : py1;
-                      const doorLengthPx = doorWidth * scale;
+                      const doorLengthPx = w * scale;
                       const inwardSign = door.swingDirection === "in" ? 1 : -1;
                       let openX = 0,
                         openY = 0;
@@ -2576,8 +2835,8 @@ export default function GridDenahScreen() {
                   {/* PINTU DINDING MANUAL */}
                   {walls.map((wall) =>
                     wall.doors.map((door, idx) => {
-                      const doorWidth = 0.8;
-                      const halfWidth = doorWidth / 2;
+                      const w = door.width || 0.8;
+                      const halfWidth = w / 2;
                       const side1 = getWallDoorSideMeter(
                         wall,
                         door,
@@ -2609,7 +2868,7 @@ export default function GridDenahScreen() {
                       const nx = -uy,
                         ny = ux;
                       const swingSign = door.swingDirection === "out" ? 1 : -1;
-                      const doorLengthPx = doorWidth * scale;
+                      const doorLengthPx = w * scale;
                       const openX = hingeX + nx * swingSign * doorLengthPx;
                       const openY = hingeY + ny * swingSign * doorLengthPx;
                       return (
@@ -2655,7 +2914,7 @@ export default function GridDenahScreen() {
                   {/* JENDELA RUANGAN */}
                   {placedRooms.map((room) =>
                     room.windows.map((win, idx) => {
-                      const windowWidth = 1.2;
+                      const w = win.width || 1.2;
                       let centerX = 0,
                         centerY = 0;
                       const pos = win.position;
@@ -2684,7 +2943,7 @@ export default function GridDenahScreen() {
                       }
                       const isVerticalEdge =
                         win.edge === "left" || win.edge === "right";
-                      const boxLength = windowWidth * scale;
+                      const boxLength = w * scale;
                       const boxDepth = 10;
                       let rectX = 0,
                         rectY = 0,
@@ -2807,7 +3066,7 @@ export default function GridDenahScreen() {
                   {/* JENDELA DINDING MANUAL */}
                   {walls.map((wall) =>
                     wall.windows.map((win, idx) => {
-                      const windowWidth = 1.2;
+                      const w = win.width || 1.2;
                       const center = getWallWindowCenterMeter(wall, win);
                       const len = Math.hypot(
                         wall.x2 - wall.x1,
@@ -2817,7 +3076,7 @@ export default function GridDenahScreen() {
                       const uy = len > 0 ? (wall.y2 - wall.y1) / len : 0;
                       const nx = -uy,
                         ny = ux;
-                      const boxLength = windowWidth * scale;
+                      const boxLength = w * scale;
                       const boxDepth = 10;
                       const cx = (center.x - effectiveBBox.minX) * scale;
                       const cy = (center.y - effectiveBBox.minY) * scale;
@@ -2908,7 +3167,7 @@ export default function GridDenahScreen() {
               </Group>
             </Canvas>
 
-            {/* LABEL OVERLAY (IKUT TRANSFORM) */}
+            {/* LABEL OVERLAY */}
             <View
               style={[
                 StyleSheet.absoluteFill,
@@ -2926,45 +3185,8 @@ export default function GridDenahScreen() {
                   ],
                 }}
               >
-                {/* Label meter horizontal — SELALU MUNCUL */}
-                {Array.from({ length: Math.floor(panjangLahan) + 1 }).map(
-                  (_, i) => {
-                    if (i === 0) return null;
-                    const localX = offsetX + i * scale - 15;
-                    const localY = offsetY - 22;
-                    return (
-                      <View
-                        key={`mx-${i}`}
-                        style={[
-                          styles.meterLabelH,
-                          { left: localX, top: localY },
-                        ]}
-                      >
-                        <Text style={styles.meterLabelText}>{`${i}m`}</Text>
-                      </View>
-                    );
-                  },
-                )}
-
-                {/* Label meter vertikal — SELALU MUNCUL */}
-                {Array.from({ length: Math.floor(tinggiLahan) + 1 }).map(
-                  (_, i) => {
-                    if (i === 0) return null;
-                    const localX = offsetX - 38;
-                    const localY = offsetY + i * scale - 8;
-                    return (
-                      <View
-                        key={`my-${i}`}
-                        style={[
-                          styles.meterLabelV,
-                          { left: localX, top: localY },
-                        ]}
-                      >
-                        <Text style={styles.meterLabelText}>{`${i}m`}</Text>
-                      </View>
-                    );
-                  },
-                )}
+                {meterLabelsH}
+                {meterLabelsV}
 
                 {placedRooms.map((room) => {
                   const localX =
@@ -2992,7 +3214,6 @@ export default function GridDenahScreen() {
           </View>
         </GestureDetector>
 
-        {/* OVERLAY HINT — saat bebas belum digambar */}
         {isBebasBelumDigambar && lahanDraft.length === 0 && (
           <View
             style={{
@@ -3034,7 +3255,7 @@ export default function GridDenahScreen() {
                 }}
               >
                 Tap titik sudut satu per satu.{"\n"}Tap titik pertama untuk
-                menutup polygon.
+                menutup polygon.{"\n"}Geser 2 jari untuk area lebih luas.
               </Text>
             </View>
           </View>
@@ -3061,6 +3282,9 @@ export default function GridDenahScreen() {
         <View style={styles.zoomInfo}>
           <Text style={styles.zoomInfoText}>
             Zoom: {Math.round(canvasScale * 100)}% • {scale.toFixed(1)}px/m
+            {history.length > 1
+              ? ` • ${historyIndex + 1}/${history.length}`
+              : ""}
           </Text>
         </View>
 
@@ -3279,6 +3503,33 @@ export default function GridDenahScreen() {
                 ? "Pintu akan dipasang di dinding manual."
                 : "Tentukan arah buka pintu dan posisi engsel."}
             </Text>
+
+            <Text style={styles.modalLabel}>Lebar Pintu (meter):</Text>
+            <View style={[styles.stepper, { marginBottom: 16 }]}>
+              <TouchableOpacity
+                style={styles.stepBtn}
+                onPress={() => handleDoorWidthChange(-0.1)}
+              >
+                <Ionicons name="remove" size={20} color="#64748B" />
+              </TouchableOpacity>
+              <TextInput
+                style={[styles.stepValue, { textAlign: "center" }]}
+                keyboardType="numeric"
+                value={doorWidth}
+                onChangeText={(t) => {
+                  const v = t.replace(/[^0-9.]/g, "");
+                  setDoorWidth(v);
+                }}
+                placeholder="0.8"
+                selectTextOnFocus
+              />
+              <TouchableOpacity
+                style={styles.stepBtn}
+                onPress={() => handleDoorWidthChange(0.1)}
+              >
+                <Ionicons name="add" size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
             <Text style={styles.modalLabel}>Arah Buka:</Text>
             <View style={styles.optionRow}>
               <TouchableOpacity
@@ -3398,6 +3649,34 @@ export default function GridDenahScreen() {
                 ? "Jendela akan dipasang di dinding manual."
                 : "Pilih jenis jendela yang diinginkan."}
             </Text>
+
+            <Text style={styles.modalLabel}>Lebar Jendela (meter):</Text>
+            <View style={[styles.stepper, { marginBottom: 16 }]}>
+              <TouchableOpacity
+                style={styles.stepBtn}
+                onPress={() => handleWindowWidthChange(-0.1)}
+              >
+                <Ionicons name="remove" size={20} color="#64748B" />
+              </TouchableOpacity>
+              <TextInput
+                style={[styles.stepValue, { textAlign: "center" }]}
+                keyboardType="numeric"
+                value={windowWidth}
+                onChangeText={(t) => {
+                  const v = t.replace(/[^0-9.]/g, "");
+                  setWindowWidth(v);
+                }}
+                placeholder="1.2"
+                selectTextOnFocus
+              />
+              <TouchableOpacity
+                style={styles.stepBtn}
+                onPress={() => handleWindowWidthChange(0.1)}
+              >
+                <Ionicons name="add" size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
             <Text style={styles.modalLabel}>Tipe:</Text>
             <View style={styles.windowTypeGrid}>
               {(

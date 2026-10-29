@@ -53,7 +53,6 @@ const ARAH_LIST: {
 
 // ============================================
 // HELPER: KONVERSI SISI → POLYGON
-// TIDAK auto-close. Skia akan close via "Z".
 // ============================================
 function sisiKePolygon(sisiList: SisiLahan[]): { x: number; y: number }[] {
   let x = 0;
@@ -115,7 +114,7 @@ function hitungSisiPenutup(sisiList: SisiLahan[]) {
 }
 
 // ============================================
-// HELPER: LUAS POLYGON (SHOELACE — MODULO VERSION)
+// HELPER: LUAS POLYGON (SHOELACE)
 // ============================================
 function luasPolygon(points: { x: number; y: number }[]): number {
   if (points.length < 3) return 0;
@@ -156,11 +155,11 @@ export default function FormProyekScreen() {
   const [namaProyek, setNamaProyek] = useState("");
   const [bentukLahan, setBentukLahan] = useState<BentukLahan>("kotak");
 
-  // ==== STATE DIMENSI KOTAK — DEFAULT 0 ====
+  // ==== STATE DIMENSI KOTAK ====
   const [panjang, setPanjang] = useState(0);
   const [lebar, setLebar] = useState(0);
 
-  // ==== STATE POLYGON — DEFAULT 3 SISI DENGAN PANJANG 0 ====
+  // ==== STATE POLYGON ====
   const [sisiList, setSisiList] = useState<SisiLahan[]>([
     { id: "s1", panjang: 0, arah: "utara" },
     { id: "s2", panjang: 0, arah: "timur" },
@@ -189,7 +188,6 @@ export default function FormProyekScreen() {
       const points = sisiKePolygon(sisiList);
       return Math.round(luasPolygon(points) * 100) / 100;
     }
-    // polygon-bebas: akan digambar di grid-denah
     return 0;
   }, [bentukLahan, panjang, lebar, sisiList]);
 
@@ -273,12 +271,9 @@ export default function FormProyekScreen() {
   // ============================================
   const testKoneksi = async (): Promise<boolean> => {
     try {
-      console.log("🔵 Test koneksi ke:", `${API_URL}/regions/`);
       await axios.get(`${API_URL}/regions/`, { timeout: 5000 });
-      console.log("🟢 Koneksi ke backend berhasil!");
       return true;
     } catch (err: any) {
-      console.error("🔴 Test koneksi GAGAL:", err?.message);
       return false;
     }
   };
@@ -318,7 +313,6 @@ export default function FormProyekScreen() {
         );
         return;
       }
-      // Cek apakah polygon bisa ditutup (sisi penutup tidak terlalu panjang)
       const cek = hitungSisiPenutup(sisiList);
       if (cek.perlu && cek.panjang > 50) {
         Alert.alert(
@@ -327,8 +321,6 @@ export default function FormProyekScreen() {
         );
         return;
       }
-    } else if (bentukLahan === "polygon-bebas") {
-      // Tidak perlu validasi dimensi — digambar di grid-denah
     }
 
     try {
@@ -338,7 +330,6 @@ export default function FormProyekScreen() {
       let buildingId = `local-${Date.now()}`;
       let backendOK = false;
 
-      // ============ HITUNG DATA LAHAN (SATU KALI SAJA) ============
       let bentukFinal: BentukLahan = bentukLahan;
       let panjangFinal = 0;
       let lebarFinal = 0;
@@ -353,21 +344,15 @@ export default function FormProyekScreen() {
         bboxFinal = { minX: 0, minY: 0, maxX: panjang, maxY: lebar };
         luasFinal = Math.round(panjang * lebar * 100) / 100;
       } else if (bentukLahan === "polygon-sisi") {
-        // Ambil polygon asli
         const rawPoly = sisiKePolygon(sisiList);
-
-        // Hapus duplikat close point jika ada
         const first = rawPoly[0];
         const last = rawPoly[rawPoly.length - 1];
         const jarak = Math.hypot(last.x - first.x, last.y - first.y);
         const polygonClean = jarak < 0.01 ? rawPoly.slice(0, -1) : rawPoly;
 
-        // Hitung bbox dari polygon asli
         const bb = boundingBox(polygonClean);
 
-        // ❌ JANGAN normalize polygon — kirim koordinat asli
         polygonFinal = polygonClean;
-
         bboxFinal = {
           minX: bb.minX,
           minY: bb.minY,
@@ -375,13 +360,10 @@ export default function FormProyekScreen() {
           maxY: bb.maxY,
         };
 
-        // Fallback params: ukuran bbox
         panjangFinal = Math.round((bb.maxX - bb.minX) * 100) / 100;
         lebarFinal = Math.round((bb.maxY - bb.minY) * 100) / 100;
-
         luasFinal = Math.round(luasPolygon(polygonClean) * 100) / 100;
       } else {
-        // polygon-bebas: placeholder, digambar di grid-denah
         bentukFinal = "polygon-bebas";
         panjangFinal = 20;
         lebarFinal = 20;
@@ -390,7 +372,6 @@ export default function FormProyekScreen() {
         luasFinal = 400;
       }
 
-      // ============ CONSTRUCT DATA LAHAN ============
       const dataLahan = {
         bentuk: bentukFinal,
         panjang: panjangFinal,
@@ -400,15 +381,8 @@ export default function FormProyekScreen() {
         luas: luasFinal,
       };
 
-      console.log("🟢 [FORM] Data lahan dikirim:", JSON.stringify(dataLahan));
-
-      // ============ SIMPAN KE BACKEND ============
       const ok = await testKoneksi();
       backendOK = ok;
-
-      if (!ok) {
-        console.warn("🟡 Backend tidak tersedia. Lanjut mode offline.");
-      }
 
       if (backendOK) {
         try {
@@ -422,8 +396,6 @@ export default function FormProyekScreen() {
             luas_lahan: luasFinal,
           };
 
-          console.log("🔵 POST /projects/:", payloadProject);
-
           const projectRes = await axios.post(
             `${API_URL}/projects/`,
             payloadProject,
@@ -431,7 +403,6 @@ export default function FormProyekScreen() {
           );
 
           projectId = projectRes.data.id.toString();
-          console.log("🟢 Project dibuat, ID:", projectId);
 
           const buildingRes = await axios.post(
             `${API_URL}/buildings/`,
@@ -440,16 +411,13 @@ export default function FormProyekScreen() {
           );
 
           buildingId = buildingRes.data.id.toString();
-          console.log("🟢 Building dibuat, ID:", buildingId);
 
-          const floorRes = await axios.post(
+          await axios.post(
             `${API_URL}/floors/`,
             { building: buildingId, level: 1, tinggi_dinding: 3.0 },
             { timeout: API_TIMEOUT },
           );
-          console.log("🟢 Floor dibuat, ID:", floorRes.data.id);
         } catch (submitErr: any) {
-          console.error("🔴 Gagal simpan ke server:", submitErr?.message);
           backendOK = false;
         }
       }
@@ -462,21 +430,12 @@ export default function FormProyekScreen() {
         );
       }
 
-      // ============ NAVIGATE ============
-      console.log(
-        backendOK
-          ? "🟢 Navigate ke grid-denah (ONLINE)"
-          : "🟡 Navigate ke grid-denah (OFFLINE)",
-      );
-
       router.push({
         pathname: "/grid-denah",
         params: {
           projectId: projectId.toString(),
           buildingId: buildingId.toString(),
-          // Kirim dataLahan lengkap — SOURCE OF TRUTH
           dataLahan: JSON.stringify(dataLahan),
-          // Fallback param
           panjang: panjangFinal.toString(),
           lebar: lebarFinal.toString(),
           regionId: selectedRegion.id.toString(),
@@ -485,7 +444,6 @@ export default function FormProyekScreen() {
         },
       });
     } catch (err: any) {
-      console.error("🔴 ERROR:", err?.message);
       Alert.alert("Error", err?.message || "Terjadi kesalahan.");
     } finally {
       setSubmitting(false);
@@ -501,17 +459,22 @@ export default function FormProyekScreen() {
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {/* HEADER */}
+        {/* HEADER BARU */}
         <View style={styles.header}>
           <TouchableOpacity
-            style={styles.headerBtn}
+            style={styles.headerBackBtn}
             onPress={() => router.back()}
           >
-            <Ionicons name="arrow-back" size={22} color="#0F172A" />
+            <Ionicons name="arrow-back" size={20} color="#0F172A" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>DATA PROYEK</Text>
-          <TouchableOpacity style={styles.headerBtn}>
-            <Ionicons name="settings-outline" size={22} color="#0F172A" />
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerTitle}>Data Proyek</Text>
+            <Text style={styles.headerSubtitle}>
+              Mulai rancangan rumah Anda
+            </Text>
+          </View>
+          <TouchableOpacity style={styles.headerSettingsBtn}>
+            <Ionicons name="settings-outline" size={20} color="#0F172A" />
           </TouchableOpacity>
         </View>
 
@@ -519,14 +482,18 @@ export default function FormProyekScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.pageTitle}>Data Proyek</Text>
-          <Text style={styles.pageSubtitle}>
-            Isi data dasar untuk memulai rancangan rumah.
-          </Text>
-
           {/* NAMA PROYEK */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Nama Proyek</Text>
+            <View style={styles.cardHeader}>
+              <View style={styles.iconBoxBlue}>
+                <Ionicons
+                  name="document-text-outline"
+                  size={16}
+                  color="#2563EB"
+                />
+              </View>
+              <Text style={styles.cardTitle}>Nama Proyek</Text>
+            </View>
             <TextInput
               style={styles.input}
               placeholder="Contoh: Rumah Keluarga Budi"
@@ -538,10 +505,17 @@ export default function FormProyekScreen() {
 
           {/* BENTUK LAHAN */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Bentuk Lahan</Text>
-            <Text style={styles.cardSubtitle}>
-              Pilih bentuk lahan sesuai kondisi tanah Anda.
-            </Text>
+            <View style={styles.cardHeader}>
+              <View style={styles.iconBoxOrange}>
+                <Ionicons name="shapes-outline" size={16} color="#EA580C" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Bentuk Lahan</Text>
+                <Text style={styles.cardSubtitle}>
+                  Pilih bentuk yang sesuai dengan kondisi tanah.
+                </Text>
+              </View>
+            </View>
 
             <View style={styles.bentukRow}>
               {/* Kotak */}
@@ -560,8 +534,8 @@ export default function FormProyekScreen() {
                 >
                   <Ionicons
                     name="square-outline"
-                    size={22}
-                    color={bentukLahan === "kotak" ? "#FFFFFF" : "#334155"}
+                    size={18}
+                    color={bentukLahan === "kotak" ? "#FFFFFF" : "#64748B"}
                   />
                 </View>
                 <Text
@@ -572,7 +546,7 @@ export default function FormProyekScreen() {
                 >
                   Kotak
                 </Text>
-                <Text style={styles.bentukDesc}>Persegi panjang</Text>
+                <Text style={styles.bentukDesc}>Persegi</Text>
               </TouchableOpacity>
 
               {/* Polygon Sisi */}
@@ -592,9 +566,9 @@ export default function FormProyekScreen() {
                 >
                   <Ionicons
                     name="shapes-outline"
-                    size={22}
+                    size={18}
                     color={
-                      bentukLahan === "polygon-sisi" ? "#FFFFFF" : "#334155"
+                      bentukLahan === "polygon-sisi" ? "#FFFFFF" : "#64748B"
                     }
                   />
                 </View>
@@ -606,7 +580,7 @@ export default function FormProyekScreen() {
                 >
                   Polygon
                 </Text>
-                <Text style={styles.bentukDesc}>Input per sisi</Text>
+                <Text style={styles.bentukDesc}>Per Sisi</Text>
               </TouchableOpacity>
 
               {/* Polygon Bebas */}
@@ -626,9 +600,9 @@ export default function FormProyekScreen() {
                 >
                   <Ionicons
                     name="brush-outline"
-                    size={22}
+                    size={18}
                     color={
-                      bentukLahan === "polygon-bebas" ? "#FFFFFF" : "#334155"
+                      bentukLahan === "polygon-bebas" ? "#FFFFFF" : "#64748B"
                     }
                   />
                 </View>
@@ -640,7 +614,7 @@ export default function FormProyekScreen() {
                 >
                   Bebas
                 </Text>
-                <Text style={styles.bentukDesc}>Gambar di grid</Text>
+                <Text style={styles.bentukDesc}>Grid</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -648,7 +622,13 @@ export default function FormProyekScreen() {
           {/* INPUT KOTAK */}
           {bentukLahan === "kotak" && (
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Dimensi Lahan</Text>
+              <View style={styles.cardHeader}>
+                <View style={styles.iconBoxGreen}>
+                  <Ionicons name="resize-outline" size={16} color="#10B981" />
+                </View>
+                <Text style={styles.cardTitle}>Dimensi Lahan</Text>
+              </View>
+
               <View style={styles.dimensiRow}>
                 <View style={styles.dimensiBox}>
                   <Text style={styles.dimensiLabel}>Lebar (m)</Text>
@@ -657,10 +637,10 @@ export default function FormProyekScreen() {
                       style={styles.stepBtn}
                       onPress={() => setLebar(Math.max(0, lebar - 1))}
                     >
-                      <Ionicons name="remove" size={20} color="#64748B" />
+                      <Ionicons name="remove" size={18} color="#0F172A" />
                     </TouchableOpacity>
                     <TextInput
-                      style={[styles.stepValue, { textAlign: "center" }]}
+                      style={styles.stepValue}
                       value={String(lebar)}
                       onChangeText={(t) => {
                         const v = parseFloat(t.replace(/[^0-9.]/g, "")) || 0;
@@ -673,7 +653,7 @@ export default function FormProyekScreen() {
                       style={styles.stepBtn}
                       onPress={() => setLebar(Math.min(999, lebar + 1))}
                     >
-                      <Ionicons name="add" size={20} color="#64748B" />
+                      <Ionicons name="add" size={18} color="#0F172A" />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -685,10 +665,10 @@ export default function FormProyekScreen() {
                       style={styles.stepBtn}
                       onPress={() => setPanjang(Math.max(0, panjang - 1))}
                     >
-                      <Ionicons name="remove" size={20} color="#64748B" />
+                      <Ionicons name="remove" size={18} color="#0F172A" />
                     </TouchableOpacity>
                     <TextInput
-                      style={[styles.stepValue, { textAlign: "center" }]}
+                      style={styles.stepValue}
                       value={String(panjang)}
                       onChangeText={(t) => {
                         const v = parseFloat(t.replace(/[^0-9.]/g, "")) || 0;
@@ -701,7 +681,7 @@ export default function FormProyekScreen() {
                       style={styles.stepBtn}
                       onPress={() => setPanjang(Math.min(999, panjang + 1))}
                     >
-                      <Ionicons name="add" size={20} color="#64748B" />
+                      <Ionicons name="add" size={18} color="#0F172A" />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -712,19 +692,25 @@ export default function FormProyekScreen() {
           {/* INPUT POLYGON SISI */}
           {bentukLahan === "polygon-sisi" && (
             <View style={styles.card}>
-              <View style={styles.sisiHeaderRow}>
+              <View style={styles.cardHeader}>
+                <View style={styles.iconBoxOrange}>
+                  <Ionicons
+                    name="analytics-outline"
+                    size={16}
+                    color="#EA580C"
+                  />
+                </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.cardTitle}>Sisi Lahan</Text>
                   <Text style={styles.cardSubtitle}>
-                    Masukkan panjang & arah tiap sisi. Sisi penutup otomatis
-                    dihitung.
+                    Masukkan panjang & arah tiap sisi.
                   </Text>
                 </View>
                 <TouchableOpacity
                   style={styles.addSisiBtn}
                   onPress={tambahSisi}
                 >
-                  <Ionicons name="add" size={18} color="#FFFFFF" />
+                  <Ionicons name="add" size={14} color="#FFFFFF" />
                   <Text style={styles.addSisiText}>Sisi</Text>
                 </TouchableOpacity>
               </View>
@@ -735,9 +721,19 @@ export default function FormProyekScreen() {
                     <Text style={styles.sisiNumberText}>{idx + 1}</Text>
                   </View>
 
-                  <View style={styles.sisiInputWrap}>
+                  <View style={styles.sisiStepper}>
+                    <TouchableOpacity
+                      style={styles.sisiStepBtn}
+                      onPress={() =>
+                        updateSisi(sisi.id, {
+                          panjang: Math.max(0, sisi.panjang - 1),
+                        })
+                      }
+                    >
+                      <Ionicons name="remove" size={14} color="#0F172A" />
+                    </TouchableOpacity>
                     <TextInput
-                      style={styles.sisiInput}
+                      style={styles.sisiStepValue}
                       value={sisi.panjang.toString()}
                       onChangeText={(t) => {
                         const v = parseFloat(t.replace(/[^0-9.]/g, "")) || 0;
@@ -748,10 +744,18 @@ export default function FormProyekScreen() {
                       placeholderTextColor="#94A3B8"
                       selectTextOnFocus
                     />
-                    <Text style={styles.sisiInputSatuan}>m</Text>
+                    <TouchableOpacity
+                      style={styles.sisiStepBtn}
+                      onPress={() =>
+                        updateSisi(sisi.id, {
+                          panjang: Math.min(999, sisi.panjang + 1),
+                        })
+                      }
+                    >
+                      <Ionicons name="add" size={14} color="#0F172A" />
+                    </TouchableOpacity>
                   </View>
 
-                  {/* Tombol arah (ikon panah) */}
                   <View style={styles.arahWrap}>
                     {ARAH_LIST.map((a) => (
                       <TouchableOpacity
@@ -764,7 +768,7 @@ export default function FormProyekScreen() {
                       >
                         <Ionicons
                           name={a.icon as any}
-                          size={16}
+                          size={14}
                           color={sisi.arah === a.key ? "#FFFFFF" : "#64748B"}
                         />
                       </TouchableOpacity>
@@ -775,12 +779,11 @@ export default function FormProyekScreen() {
                     style={styles.sisiDeleteBtn}
                     onPress={() => hapusSisi(sisi.id)}
                   >
-                    <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                    <Ionicons name="trash-outline" size={14} color="#DC2626" />
                   </TouchableOpacity>
                 </View>
               ))}
 
-              {/* STATUS SISI PENUTUP */}
               <View
                 style={[
                   styles.validasiBox,
@@ -796,7 +799,7 @@ export default function FormProyekScreen() {
                       : "information-circle"
                   }
                   size={16}
-                  color={!sisiPenutup.perlu ? "#16A34A" : "#1E40AF"}
+                  color={!sisiPenutup.perlu ? "#16A34A" : "#2563EB"}
                 />
                 <Text
                   style={[
@@ -807,15 +810,9 @@ export default function FormProyekScreen() {
                   ]}
                 >
                   {sisiPenutup.perlu
-                    ? `Sisi penutup otomatis: ${sisiPenutup.panjang}m arah ${sisiPenutup.arah.toUpperCase()}`
-                    : "Polygon sudah tertutup sempurna!"}
+                    ? `Sisi penutup: ${sisiPenutup.panjang}m arah ${sisiPenutup.arah.toUpperCase()}`
+                    : "Polygon tertutup sempurna!"}
                 </Text>
-              </View>
-
-              {/* LUAS */}
-              <View style={styles.polygonInfoRow}>
-                <Text style={styles.polygonInfoLabel}>Luas lahan:</Text>
-                <Text style={styles.polygonInfoValue}>{totalLuas} m²</Text>
               </View>
             </View>
           )}
@@ -824,25 +821,15 @@ export default function FormProyekScreen() {
           {bentukLahan === "polygon-bebas" && (
             <View style={styles.card}>
               <View style={styles.bebasHeader}>
-                <Ionicons name="brush-outline" size={20} color="#EA580C" />
-                <Text style={styles.bebasTitle}>
-                  Gambar Lahan di Grid Denah
-                </Text>
+                <View style={styles.iconBoxOrange}>
+                  <Ionicons name="brush-outline" size={16} color="#EA580C" />
+                </View>
+                <Text style={styles.bebasTitle}>Gambar Bebas di Grid</Text>
               </View>
               <Text style={styles.bebasDesc}>
-                Anda akan diarahkan ke halaman Grid Denah dalam mode{" "}
-                <Text style={{ fontWeight: "700", color: "#EA580C" }}>
-                  Gambar Lahan
-                </Text>
-                . Tap titik-titik sudut lahan, lalu tap titik pertama untuk
-                menutup polygon.
+                Anda akan diarahkan ke halaman Grid Denah. Ketuk titik-titik
+                sudut lahan pada grid, lalu tutup dengan mengetuk titik pertama.
               </Text>
-              <View style={styles.bebasHint}>
-                <Ionicons name="information-circle" size={14} color="#1E40AF" />
-                <Text style={styles.bebasHintText}>
-                  Cocok untuk lahan dengan bentuk tidak beraturan.
-                </Text>
-              </View>
             </View>
           )}
 
@@ -850,24 +837,33 @@ export default function FormProyekScreen() {
           {bentukLahan !== "polygon-bebas" && (
             <View style={styles.infoCard}>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Total Luas Lahan</Text>
-                <Text style={styles.infoLabel}>Area Bangun (60%)</Text>
-              </View>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoValue}>{totalLuas} m²</Text>
-                <Text style={[styles.infoValue, { color: "#EA580C" }]}>
-                  {areaBangun} m²
-                </Text>
+                <View>
+                  <Text style={styles.infoLabel}>Total Luas Lahan</Text>
+                  <Text style={styles.infoValue}>{totalLuas} m²</Text>
+                </View>
+                <View style={{ alignItems: "flex-end" }}>
+                  <Text style={styles.infoLabel}>Area Bangun (60%)</Text>
+                  <Text style={[styles.infoValue, { color: "#F5A623" }]}>
+                    {areaBangun} m²
+                  </Text>
+                </View>
               </View>
             </View>
           )}
 
           {/* LOKASI */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Lokasi / Daerah</Text>
-            <Text style={styles.cardSubtitle}>
-              Pilih kota tempat rumah akan dibangun.
-            </Text>
+            <View style={styles.cardHeader}>
+              <View style={styles.iconBoxBlue}>
+                <Ionicons name="location-outline" size={16} color="#2563EB" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Lokasi / Daerah</Text>
+                <Text style={styles.cardSubtitle}>
+                  Pilih kota tempat rumah dibangun.
+                </Text>
+              </View>
+            </View>
 
             <TouchableOpacity
               style={styles.locationButton}
@@ -876,8 +872,8 @@ export default function FormProyekScreen() {
             >
               <View style={styles.locationLeft}>
                 <Ionicons
-                  name="location"
-                  size={20}
+                  name="map"
+                  size={18}
                   color={selectedRegion ? "#EA580C" : "#94A3B8"}
                 />
                 <View style={{ marginLeft: 10 }}>
@@ -896,7 +892,7 @@ export default function FormProyekScreen() {
                   )}
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#94A3B8" />
+              <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
             </TouchableOpacity>
           </View>
 
@@ -916,7 +912,7 @@ export default function FormProyekScreen() {
                     ? "Lanjut & Gambar Lahan"
                     : "Lanjut ke Grid Denah"}
                 </Text>
-                <Ionicons name="arrow-forward" size={20} color="white" />
+                <Ionicons name="arrow-forward" size={18} color="white" />
               </>
             )}
           </TouchableOpacity>
@@ -934,7 +930,7 @@ export default function FormProyekScreen() {
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Pilih Lokasi</Text>
                 <TouchableOpacity onPress={() => setModalVisible(false)}>
-                  <Ionicons name="close" size={24} color="#0F172A" />
+                  <Ionicons name="close" size={20} color="#0F172A" />
                 </TouchableOpacity>
               </View>
 
@@ -1015,69 +1011,111 @@ export default function FormProyekScreen() {
 // STYLES
 // ============================================
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F1F5F9" },
+  container: { flex: 1, backgroundColor: "#F8FAFC" },
 
+  // ==== HEADER MODERN ====
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: "#FFFFFF",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
+    borderBottomColor: "#F1F5F9",
   },
-  headerBtn: { padding: 4 },
-  headerTitle: { fontSize: 17, fontWeight: "700", color: "#0F172A" },
-
-  scrollContent: { padding: 16, paddingBottom: 40 },
-
-  pageTitle: {
-    fontSize: 24,
+  headerBackBtn: {
+    padding: 8,
+    backgroundColor: "#F1F5F9",
+    borderRadius: 10,
+  },
+  headerTitleWrap: {
+    alignItems: "center",
+  },
+  headerTitle: {
+    fontSize: 17,
     fontWeight: "800",
     color: "#0F172A",
-    marginBottom: 4,
   },
-  pageSubtitle: {
-    fontSize: 14,
+  headerSubtitle: {
+    fontSize: 11,
     color: "#64748B",
-    marginBottom: 20,
-    lineHeight: 20,
+    marginTop: 2,
+  },
+  headerSettingsBtn: {
+    padding: 8,
+    backgroundColor: "#F1F5F9",
+    borderRadius: 10,
   },
 
+  scrollContent: { padding: 20, paddingBottom: 60 },
+
+  // ==== CARD MODERN ====
   card: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
+    borderColor: "#F1F5F9",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 14,
   },
   cardTitle: {
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 15,
+    fontWeight: "800",
     color: "#0F172A",
-    marginBottom: 4,
   },
   cardSubtitle: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#64748B",
-    marginBottom: 12,
-    lineHeight: 16,
+    marginTop: 2,
+    lineHeight: 14,
   },
 
+  // Ikon-Ikon Warna (Dikecilkan)
+  iconBoxBlue: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconBoxOrange: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: "#FFF7ED",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconBoxGreen: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: "#ECFDF5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // ==== PILIHAN BENTUK LAHAN ====
   bentukRow: { flexDirection: "row", gap: 8 },
   bentukBtn: {
     flex: 1,
     backgroundColor: "#F8FAFC",
     borderWidth: 2,
-    borderColor: "#E2E8F0",
-    borderRadius: 12,
+    borderColor: "#F1F5F9",
+    borderRadius: 16,
     padding: 10,
     alignItems: "center",
     gap: 6,
@@ -1087,53 +1125,52 @@ const styles = StyleSheet.create({
     borderColor: "#EA580C",
   },
   bentukIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: "#E2E8F0",
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "#F1F5F9",
     alignItems: "center",
     justifyContent: "center",
   },
   bentukIconBoxActive: { backgroundColor: "#EA580C" },
-  bentukLabel: { fontSize: 13, fontWeight: "700", color: "#334155" },
+  bentukLabel: { fontSize: 12, fontWeight: "800", color: "#334155" },
   bentukLabelActive: { color: "#EA580C" },
-  bentukDesc: { fontSize: 10, color: "#94A3B8", textAlign: "center" },
+  bentukDesc: {
+    fontSize: 10,
+    color: "#94A3B8",
+    textAlign: "center",
+    fontWeight: "500",
+  },
 
+  // ==== DIMENSI / STEPPER ====
   dimensiRow: { flexDirection: "row", gap: 12 },
   dimensiBox: { flex: 1 },
   dimensiLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#334155",
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#475569",
     marginBottom: 6,
   },
   stepper: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: "#F1F5F9",
+    borderRadius: 14,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 2,
   },
   stepBtn: { padding: 8, justifyContent: "center", alignItems: "center" },
   stepValue: {
     flex: 1,
     textAlign: "center",
     fontSize: 18,
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#0F172A",
     paddingVertical: 6,
-    minWidth: 40,
   },
 
-  sisiHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 8,
-    gap: 8,
-  },
+  // ==== POLYGON SISI ====
   addSisiBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1144,13 +1181,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   addSisiText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
+
   sisiRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
+    borderBottomColor: "#F8FAFC",
   },
   sisiNumber: {
     width: 26,
@@ -1160,26 +1198,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  sisiNumberText: { fontSize: 12, fontWeight: "700", color: "#334155" },
-  sisiInputWrap: {
+  sisiNumberText: { fontSize: 11, fontWeight: "800", color: "#475569" },
+
+  sisiStepper: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    backgroundColor: "#FFFFFF",
-    width: 80,
+    borderWidth: 2,
+    borderColor: "#F1F5F9",
+    borderRadius: 10,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 2,
+    width: 100,
   },
-  sisiInput: {
+  sisiStepBtn: { padding: 6, justifyContent: "center", alignItems: "center" },
+  sisiStepValue: {
     flex: 1,
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "800",
     color: "#0F172A",
-    paddingVertical: 6,
-    textAlign: "right",
+    paddingVertical: 4,
+    textAlign: "center",
   },
-  sisiInputSatuan: { fontSize: 12, color: "#64748B", marginLeft: 2 },
+
   arahWrap: {
     flexDirection: "row",
     gap: 4,
@@ -1187,9 +1227,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   arahBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 6,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
     backgroundColor: "#F1F5F9",
     alignItems: "center",
     justifyContent: "center",
@@ -1199,171 +1239,180 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: "#FEE2E2",
+    backgroundColor: "#FEF2F2",
     alignItems: "center",
     justifyContent: "center",
   },
 
+  // ==== KOTAK VALIDASI ====
   validasiBox: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    padding: 10,
-    borderRadius: 8,
-    marginTop: 10,
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 14,
   },
   validasiBoxOK: { backgroundColor: "#DCFCE7" },
-  validasiBoxInfo: { backgroundColor: "#DBEAFE" },
-  validasiText: { fontSize: 12, fontWeight: "600", flex: 1 },
+  validasiBoxInfo: { backgroundColor: "#EFF6FF" },
+  validasiText: { fontSize: 11, fontWeight: "700", flex: 1 },
 
-  polygonInfoRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
-  },
-  polygonInfoLabel: { fontSize: 13, fontWeight: "600", color: "#334155" },
-  polygonInfoValue: { fontSize: 16, fontWeight: "800", color: "#EA580C" },
-
+  // ==== POLYGON BEBAS ====
   bebasHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginBottom: 8,
-  },
-  bebasTitle: { fontSize: 15, fontWeight: "700", color: "#0F172A" },
-  bebasDesc: {
-    fontSize: 13,
-    color: "#475569",
-    lineHeight: 20,
+    gap: 10,
     marginBottom: 10,
   },
-  bebasHint: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#DBEAFE",
-    padding: 10,
-    borderRadius: 8,
+  bebasTitle: { fontSize: 15, fontWeight: "800", color: "#0F172A" },
+  bebasDesc: {
+    fontSize: 12,
+    color: "#475569",
+    lineHeight: 20,
   },
-  bebasHintText: { fontSize: 11, color: "#1E40AF", flex: 1 },
 
+  // ==== KARTU TOTAL LUAS (DARK MODE) ====
   infoCard: {
     backgroundColor: "#1E293B",
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     marginBottom: 16,
+    shadowColor: "#1E293B",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 6,
   },
   infoRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  infoLabel: { color: "#CBD5E1", fontSize: 12, fontWeight: "500" },
+  infoLabel: {
+    color: "#94A3B8",
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.5,
+  },
   infoValue: {
     color: "#FFFFFF",
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: "800",
     marginTop: 4,
   },
 
+  // ==== INPUT & LOKASI ====
   input: {
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderWidth: 2,
+    borderColor: "#F1F5F9",
     padding: 12,
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    backgroundColor: "#F8FAFC",
     fontSize: 14,
     color: "#0F172A",
+    fontWeight: "600",
   },
 
   locationButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "#F1F5F9",
+    borderRadius: 14,
     padding: 14,
     backgroundColor: "#F8FAFC",
   },
   locationLeft: { flexDirection: "row", alignItems: "center", flex: 1 },
-  locationButtonText: { fontSize: 15, fontWeight: "600", color: "#0F172A" },
-  locationPlaceholder: { color: "#94A3B8", fontWeight: "400" },
-  locationButtonSub: { fontSize: 12, color: "#64748B", marginTop: 2 },
+  locationButtonText: { fontSize: 14, fontWeight: "700", color: "#0F172A" },
+  locationPlaceholder: { color: "#94A3B8", fontWeight: "500" },
+  locationButtonSub: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 2,
+    fontWeight: "500",
+  },
 
+  // ==== MODAL LOKASI ====
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(15, 23, 42, 0.6)",
     justifyContent: "flex-end",
   },
   modalContent: {
     backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 20,
-    maxHeight: "80%",
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    padding: 24,
+    maxHeight: "85%",
     minHeight: "50%",
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 20,
   },
-  modalTitle: { fontSize: 18, fontWeight: "700", color: "#0F172A" },
+  modalTitle: { fontSize: 18, fontWeight: "800", color: "#0F172A" },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#F8FAFC",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.OS === "ios" ? 12 : 4,
-    gap: 8,
+    borderWidth: 2,
+    borderColor: "#F1F5F9",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === "ios" ? 12 : 6,
+    gap: 10,
   },
   searchInput: {
     flex: 1,
     fontSize: 14,
     color: "#0F172A",
-    paddingVertical: 8,
+    paddingVertical: 6,
+    fontWeight: "600",
   },
   dropdownItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
+    borderRadius: 12,
+    marginTop: 4,
   },
   dropdownItemActive: { backgroundColor: "#FFF7ED" },
-  dropdownItemText: { fontSize: 15, fontWeight: "600", color: "#0F172A" },
-  dropdownItemSub: { fontSize: 12, color: "#64748B", marginTop: 2 },
+  dropdownItemText: { fontSize: 14, fontWeight: "700", color: "#0F172A" },
+  dropdownItemSub: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 2,
+    fontWeight: "500",
+  },
   dropdownEmpty: {
-    padding: 24,
+    padding: 32,
     textAlign: "center",
     color: "#64748B",
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: "500",
   },
 
+  // ==== TOMBOL LANJUT ====
   btn: {
-    marginTop: 8,
+    marginTop: 16,
     backgroundColor: "#EA580C",
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
     shadowColor: "#EA580C",
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowRadius: 10,
+    elevation: 6,
   },
-  btnText: { color: "#FFFFFF", fontWeight: "700", fontSize: 16 },
+  btnText: { color: "#FFFFFF", fontWeight: "800", fontSize: 15 },
 });
