@@ -24,10 +24,9 @@ import { Canvas, Line, Rect, Group, Path } from "@shopify/react-native-skia";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import axios from "axios";
 
-const API_URL = "http://192.168.110.12:8000/api";
-const API_TIMEOUT = 10000;
+// ✅ IMPORT FUNGSI DATABASE LOKAL
+import { updateProyek } from "../db";
 
 // ============================================
 // KONSTANTA
@@ -45,13 +44,9 @@ const HIT_THRESHOLD = 0.35;
 const WALL_HIT_THRESHOLD = 0.4;
 const MAX_HISTORY = 50;
 
-// ✅ bbox default saat mode bebas belum digambar
 const DEFAULT_FREE_BBOX = 50;
-// ✅ padding ruang kosong di sekitar draft polygon (meter)
 const FREE_MODE_MARGIN = 10;
-// ✅ batas minimal scale agar garis minor (1m) masih tampil
 const MIN_SCALE_SHOW_MINOR = 6;
-// ✅ batas total garis agar tidak freeze
 const MAX_TOTAL_GRID_LINES = 2000;
 
 // ============================================
@@ -233,33 +228,6 @@ function polygonArea(points: { x: number; y: number }[]): number {
     area -= points[j].x * points[i].y;
   }
   return Math.abs(area) / 2;
-}
-
-function crossProduct(
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-  cx: number,
-  cy: number,
-): number {
-  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-}
-
-function onSegment(
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-  cx: number,
-  cy: number,
-): boolean {
-  return (
-    Math.min(ax, bx) <= cx &&
-    cx <= Math.max(ax, bx) &&
-    Math.min(ay, by) <= cy &&
-    cy <= Math.max(ay, by)
-  );
 }
 
 function lineSegmentIntersection(
@@ -626,7 +594,6 @@ export default function GridDenahScreen() {
   // ✅ EFFECTIVE BBOX DINAMIS — GRID 1m KONSISTEN
   // ============================================
   const effectiveBBox = useMemo(() => {
-    // Polygon final → pakai polygon, selalu mulai dari 0
     if (lahanPolygon && lahanPolygon.length >= 3) {
       const xs = lahanPolygon.map((p) => p.x);
       const ys = lahanPolygon.map((p) => p.y);
@@ -642,7 +609,6 @@ export default function GridDenahScreen() {
       };
     }
 
-    // Mode bebas sedang menggambar → bbox tumbuh mengikuti draft + margin
     if (isBebasBelumDigambar && lahanDraft.length > 0) {
       const xs = lahanDraft.map((p) => p.x);
       const ys = lahanDraft.map((p) => p.y);
@@ -658,7 +624,6 @@ export default function GridDenahScreen() {
       };
     }
 
-    // Mode bebas kosong
     if (isBebasBelumDigambar) {
       return {
         minX: 0,
@@ -668,7 +633,6 @@ export default function GridDenahScreen() {
       };
     }
 
-    // Kotak / polygon-sisi biasa
     const w = Math.max(bbox.maxX - bbox.minX, 1);
     const h = Math.max(bbox.maxY - bbox.minY, 1);
     return {
@@ -689,11 +653,43 @@ export default function GridDenahScreen() {
   );
 
   // ============================================
-  // STATE UTAMA
+  // ✅ STATE UTAMA (MEMBACA DARI RIWAYAT SQLITE JIKA ADA)
   // ============================================
   const [selectedRoomType, setSelectedRoomType] = useState(ROOM_TYPES[0]);
-  const [placedRooms, setPlacedRooms] = useState<PlacedRoom[]>([]);
-  const [walls, setWalls] = useState<Wall[]>([]);
+
+  const [placedRooms, setPlacedRooms] = useState<PlacedRoom[]>(() => {
+    if (params.savedRooms) {
+      try {
+        return JSON.parse(params.savedRooms as string);
+      } catch (e) {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  const [walls, setWalls] = useState<Wall[]>(() => {
+    if (params.savedWalls) {
+      try {
+        return JSON.parse(params.savedWalls as string);
+      } catch (e) {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  const [placedAreas, setPlacedAreas] = useState<PlacedArea[]>(() => {
+    if (params.savedAreas) {
+      try {
+        return JSON.parse(params.savedAreas as string);
+      } catch (e) {
+        return [];
+      }
+    }
+    return [];
+  });
+
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
@@ -702,7 +698,6 @@ export default function GridDenahScreen() {
     dataLahan.bentuk === "polygon-bebas" ? "draw-lahan" : "draw-room",
   );
 
-  const [placedAreas, setPlacedAreas] = useState<PlacedArea[]>([]);
   const [pendingArea, setPendingArea] = useState<{
     left: number;
     right: number;
@@ -755,22 +750,23 @@ export default function GridDenahScreen() {
   const [renameWallModalVisible, setRenameWallModalVisible] = useState(false);
   const [renameWallValue, setRenameWallValue] = useState("");
 
-    const handleDoorWidthChange = (delta: number) => {
-      const current = parseFloat(doorWidth) || 0.8;
-      const next = Math.max(0.1, Math.min(5, current + delta)); // min 0.1m, max 5m
-      setDoorWidth(next.toFixed(1));
-    };
+  const handleDoorWidthChange = (delta: number) => {
+    const current = parseFloat(doorWidth) || 0.8;
+    const next = Math.max(0.1, Math.min(5, current + delta));
+    setDoorWidth(next.toFixed(1));
+  };
 
-    const handleWindowWidthChange = (delta: number) => {
-      const current = parseFloat(windowWidth) || 1.2;
-      const next = Math.max(0.1, Math.min(5, current + delta)); // min 0.1m, max 5m
-      setWindowWidth(next.toFixed(1));
-    };
+  const handleWindowWidthChange = (delta: number) => {
+    const current = parseFloat(windowWidth) || 1.2;
+    const next = Math.max(0.1, Math.min(5, current + delta));
+    setWindowWidth(next.toFixed(1));
+  };
+
   // ============================================
   // HISTORY STATE
   // ============================================
   const [history, setHistory] = useState<HistorySnapshot[]>([
-    { rooms: [], walls: [], areas: [] },
+    { rooms: placedRooms, walls: walls, areas: placedAreas },
   ]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const historyRef = useRef<HistorySnapshot[]>(history);
@@ -960,7 +956,11 @@ export default function GridDenahScreen() {
 
   useEffect(() => {
     isRestoringRef.current = false;
-    const initial: HistorySnapshot = { rooms: [], walls: [], areas: [] };
+    const initial: HistorySnapshot = {
+      rooms: placedRooms,
+      walls: walls,
+      areas: placedAreas,
+    };
     setHistory([initial]);
     setHistoryIndex(0);
     historyRef.current = [initial];
@@ -1069,7 +1069,6 @@ export default function GridDenahScreen() {
 
       // ============ MODE DRAW-LAHAN ============
       if (m === "draw-lahan") {
-        // ✅ Snap 1m. Titik negatif diizinkan (bisa geser ke kiri/atas).
         const sx = snapGrid(mx);
         const sy = snapGrid(my);
         const draft = lahanDraftRef.current;
@@ -2039,7 +2038,7 @@ export default function GridDenahScreen() {
   };
 
   // ============================================
-  // HANDLER: SUBMIT
+  // HANDLER: SUBMIT (SIMPAN KE SQLITE)
   // ============================================
   const handleSubmit = async () => {
     if (placedRooms.length === 0 && walls.length === 0) {
@@ -2047,78 +2046,46 @@ export default function GridDenahScreen() {
       return;
     }
 
-    if (!backendOK) {
+    try {
+      setSaving(true);
+
+      const currentProjectId = params.projectId
+        ? Number(params.projectId)
+        : null;
+
+      if (!currentProjectId) {
+        Alert.alert("Gagal", "ID Proyek tidak ditemukan.");
+        return;
+      }
+
+      const dataDesainLengkap = {
+        rooms: placedRooms,
+        walls: walls,
+        areas: placedAreas,
+        lahanPolygon: lahanPolygon,
+      };
+
+      // ✅ UPDATE DATABASE SQLITE LOKAL
+      updateProyek(
+        currentProjectId,
+        dataDesainLengkap,
+        `${panjangLahan.toFixed(1)}m x ${tinggiLahan.toFixed(1)}m`,
+      );
+
       Alert.alert(
-        "💾 Disimpan Lokal",
-        `${placedRooms.length} ruangan tersimpan di HP.\n\nLanjut ke tampilan 3D?`,
+        "✅ Berhasil Disimpan!",
+        `${placedRooms.length} ruangan & ${walls.length} dinding tersimpan di HP.\n\nLanjut ke tampilan 3D?`,
         [
-          { text: "Nanti", style: "cancel" },
+          {
+            text: "Kembali ke Riwayat",
+            style: "cancel",
+            onPress: () => router.push("/projek"),
+          },
           { text: "Lihat 3D", onPress: () => goToViewer3D() },
         ],
       );
-      return;
-    }
-
-    try {
-      setSaving(true);
-      const floorRes = await axios.get(
-        `${API_URL}/floors/?building=${buildingId}`,
-        { timeout: API_TIMEOUT },
-      );
-      const floorId = floorRes.data?.[0]?.id;
-      if (!floorId) {
-        Alert.alert("Error", "Floor tidak ditemukan.");
-        return;
-      }
-      for (const r of placedRooms) {
-        await axios.post(
-          `${API_URL}/rooms/`,
-          {
-            floor: floorId,
-            nama: r.nama,
-            x: r.x,
-            y: r.y,
-            panjang: r.panjang,
-            lebar: r.lebar,
-          },
-          { timeout: API_TIMEOUT },
-        );
-      }
-      for (const w of walls) {
-        try {
-          await axios.post(
-            `${API_URL}/walls/`,
-            {
-              floor: floorId,
-              start_x: w.x1,
-              start_y: w.y1,
-              end_x: w.x2,
-              end_y: w.y2,
-              tebal: 0.15,
-              tinggi: 3.0,
-              nama: w.nama || "",
-            },
-            { timeout: API_TIMEOUT },
-          );
-        } catch (wallErr) {
-          console.log("Dinding gagal disimpan:", wallErr);
-        }
-      }
-      Alert.alert(
-        "✅ Berhasil!",
-        `${placedRooms.length} ruangan & ${walls.length} dinding tersimpan.\n\nLanjut ke tampilan 3D?`,
-        [
-          { text: "Nanti", style: "cancel" },
-          { text: "Lihat 3D", onPress: () => goToViewer3D(floorId) },
-        ],
-      );
     } catch (err: any) {
-      Alert.alert(
-        "Gagal Simpan",
-        err?.response?.data
-          ? JSON.stringify(err.response.data)
-          : err?.message || "Cek koneksi.",
-      );
+      Alert.alert("Gagal Simpan", err?.message || "Terjadi kesalahan.");
     } finally {
       setSaving(false);
     }
@@ -2142,8 +2109,6 @@ export default function GridDenahScreen() {
     const startY = Math.floor(bb.minY);
     const endY = Math.ceil(bb.maxY);
 
-    // Selalu 1m per garis. Jika zoom-out terlalu jauh (scale < 6),
-    // hanya garis major (kelipatan 5m) yang digambar agar tidak freeze.
     const showMinor = scale >= MIN_SCALE_SHOW_MINOR;
     const totalX = endX - startX + 1;
     const totalY = endY - startY + 1;
@@ -3209,6 +3174,25 @@ export default function GridDenahScreen() {
                     </View>
                   );
                 })}
+
+                {/* ✅ RENDER NAMA AREA DI OVERLAY */}
+                {placedAreas.map((area) => {
+                  const localX =
+                    offsetX + (area.centerX - effectiveBBox.minX) * scale - 40;
+                  const localY =
+                    offsetY + (area.centerY - effectiveBBox.minY) * scale - 8;
+                  return (
+                    <View
+                      key={`lbl-area-${area.id}`}
+                      style={[
+                        styles.areaLabelOverlay,
+                        { left: localX, top: localY },
+                      ]}
+                    >
+                      <Text style={styles.areaLabelName}>{area.nama}</Text>
+                    </View>
+                  );
+                })}
               </View>
             </View>
           </View>
@@ -3419,7 +3403,7 @@ export default function GridDenahScreen() {
         </View>
       )}
 
-      {/* EDIT PANEL AREA */}
+      {/* ✅ EDIT PANEL AREA (DIPERBAIKI TAMPILANNYA) */}
       {selectedArea && mode === "idle" && !isBebasBelumDigambar && (
         <View style={styles.editPanel}>
           <View style={styles.editPanelHeader}>
@@ -4072,6 +4056,26 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   roomLabelSize: { fontSize: 9, color: "#475569", fontWeight: "600" },
+
+  // ✅ STYLE BARU UNTUK LABEL AREA DI KANVAS
+  areaLabelOverlay: {
+    position: "absolute",
+    width: 100,
+    alignItems: "center",
+    opacity: 0.9,
+  },
+  areaLabelName: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#334155",
+    textAlign: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.8)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+
   zoomInfo: {
     position: "absolute",
     top: 12,

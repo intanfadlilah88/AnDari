@@ -26,6 +26,9 @@ import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
 import { getToken, saveAuth } from "../services/storage";
 
+// ✅ IMPORT FUNGSI DATABASE LOKAL
+import { initDatabase } from "../db"; // Sesuaikan path jika folder db Anda berada di luar folder src/app
+
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // ============================================
@@ -68,7 +71,18 @@ export default function RootLayout() {
   const [showRegister, setShowRegister] = useState(false);
 
   useEffect(() => {
+    // Sembunyikan splash screen
     SplashScreen.hideAsync().catch(() => {});
+
+    // ✅ INISIALISASI DATABASE LOKAL (Buat tabel jika belum ada)
+    try {
+      initDatabase();
+      console.log("Database lokal siap digunakan.");
+    } catch (error) {
+      console.error("Gagal inisialisasi database:", error);
+    }
+
+    // Cek autentikasi
     checkAuth();
   }, []);
 
@@ -136,7 +150,7 @@ export default function RootLayout() {
         >
           <AnimatedSplashOverlay />
 
-          {/* ✅ PERBAIKAN: Bungkus AppTabs dengan Stack agar bisa navigasi ke halaman lain */}
+          {/* ✅ Bungkus AppTabs dengan Stack agar bisa navigasi ke halaman lain */}
           <Stack screenOptions={{ headerShown: false }}>
             {/* Layar Utama (Tab) */}
             <Stack.Screen name="index" />

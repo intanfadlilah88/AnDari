@@ -1,6 +1,6 @@
 // src/app/form-proyek.tsx
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -18,26 +18,204 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import axios from "axios";
+import MapView, { Marker, PROVIDER_GOOGLE, Region } from "react-native-maps";
 
-import { REGIONS, RegionOption } from "../constants/regions";
-import { API_URL, API_TIMEOUT } from "../constants/config";
+// ✅ IMPORT FUNGSI DATABASE LOKAL
+import { simpanProyekBaru } from "../db";
 
 // ============================================
-// TIPE BENTUK LAHAN
+// 1. DATA KABUPATEN (JAWA TENGAH & DIY)
+// ============================================
+type RegionOption = {
+  id: string;
+  nama: string;
+  provinsi: string;
+  latitude: number;
+  longitude: number;
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+};
+
+const REGIONS_KABUPATEN: RegionOption[] = [
+  // --- D.I. YOGYAKARTA ---
+  {
+    id: "yk_1",
+    nama: "Kota Yogyakarta",
+    provinsi: "DI Yogyakarta",
+    latitude: -7.7956,
+    longitude: 110.3695,
+    minLat: -7.83,
+    maxLat: -7.76,
+    minLng: 110.34,
+    maxLng: 110.42,
+  },
+  {
+    id: "yk_2",
+    nama: "Kab. Sleman",
+    provinsi: "DI Yogyakarta",
+    latitude: -7.7161,
+    longitude: 110.3554,
+    minLat: -7.85,
+    maxLat: -7.58,
+    minLng: 110.25,
+    maxLng: 110.48,
+  },
+  {
+    id: "yk_3",
+    nama: "Kab. Bantul",
+    provinsi: "DI Yogyakarta",
+    latitude: -7.8889,
+    longitude: 110.3286,
+    minLat: -8.0,
+    maxLat: -7.78,
+    minLng: 110.25,
+    maxLng: 110.45,
+  },
+  {
+    id: "yk_4",
+    nama: "Kab. Gunungkidul",
+    provinsi: "DI Yogyakarta",
+    latitude: -7.9667,
+    longitude: 110.6,
+    minLat: -8.15,
+    maxLat: -7.78,
+    minLng: 110.4,
+    maxLng: 110.85,
+  },
+  {
+    id: "yk_5",
+    nama: "Kab. Kulon Progo",
+    provinsi: "DI Yogyakarta",
+    latitude: -7.825,
+    longitude: 110.1667,
+    minLat: -7.95,
+    maxLat: -7.65,
+    minLng: 110.0,
+    maxLng: 110.25,
+  },
+
+  // --- JAWA TENGAH ---
+  {
+    id: "jt_1",
+    nama: "Kota Semarang",
+    provinsi: "Jawa Tengah",
+    latitude: -6.9667,
+    longitude: 110.4167,
+    minLat: -7.05,
+    maxLat: -6.9,
+    minLng: 110.25,
+    maxLng: 110.5,
+  },
+  {
+    id: "jt_2",
+    nama: "Kab. Semarang",
+    provinsi: "Jawa Tengah",
+    latitude: -7.2,
+    longitude: 110.45,
+    minLat: -7.35,
+    maxLat: -7.0,
+    minLng: 110.25,
+    maxLng: 110.6,
+  },
+  {
+    id: "jt_3",
+    nama: "Kota Surakarta (Solo)",
+    provinsi: "Jawa Tengah",
+    latitude: -7.5755,
+    longitude: 110.8243,
+    minLat: -7.6,
+    maxLat: -7.53,
+    minLng: 110.78,
+    maxLng: 110.87,
+  },
+  {
+    id: "jt_4",
+    nama: "Kab. Boyolali",
+    provinsi: "Jawa Tengah",
+    latitude: -7.525,
+    longitude: 110.6,
+    minLat: -7.65,
+    maxLat: -7.3,
+    minLng: 110.45,
+    maxLng: 110.75,
+  },
+  {
+    id: "jt_5",
+    nama: "Kab. Klaten",
+    provinsi: "Jawa Tengah",
+    latitude: -7.7,
+    longitude: 110.6,
+    minLat: -7.8,
+    maxLat: -7.55,
+    minLng: 110.45,
+    maxLng: 110.75,
+  },
+  {
+    id: "jt_6",
+    nama: "Kab. Magelang",
+    provinsi: "Jawa Tengah",
+    latitude: -7.4667,
+    longitude: 110.2167,
+    minLat: -7.65,
+    maxLat: -7.3,
+    minLng: 110.0,
+    maxLng: 110.35,
+  },
+  {
+    id: "jt_7",
+    nama: "Kota Magelang",
+    provinsi: "Jawa Tengah",
+    latitude: -7.47,
+    longitude: 110.2178,
+    minLat: -7.5,
+    maxLat: -7.44,
+    minLng: 110.19,
+    maxLng: 110.24,
+  },
+  {
+    id: "jt_8",
+    nama: "Kab. Purworejo",
+    provinsi: "Jawa Tengah",
+    latitude: -7.7167,
+    longitude: 110.0,
+    minLat: -7.9,
+    maxLat: -7.55,
+    minLng: 109.8,
+    maxLng: 110.15,
+  },
+  {
+    id: "jt_9",
+    nama: "Kab. Kebumen",
+    provinsi: "Jawa Tengah",
+    latitude: -7.6667,
+    longitude: 109.65,
+    minLat: -7.85,
+    maxLat: -7.45,
+    minLng: 109.3,
+    maxLng: 109.85,
+  },
+  {
+    id: "jt_10",
+    nama: "Kab. Banyumas",
+    provinsi: "Jawa Tengah",
+    latitude: -7.45,
+    longitude: 109.2333,
+    minLat: -7.65,
+    maxLat: -7.25,
+    minLng: 109.0,
+    maxLng: 109.45,
+  },
+];
+
+// ============================================
+// TIPE BENTUK LAHAN & HELPER
 // ============================================
 type BentukLahan = "kotak" | "polygon-sisi" | "polygon-bebas";
-
-// ============================================
-// SISI POLYGON
-// ============================================
 type ArahMataAngin = "utara" | "timur" | "selatan" | "barat";
 
-type SisiLahan = {
-  id: string;
-  panjang: number;
-  arah: ArahMataAngin;
-};
+type SisiLahan = { id: string; panjang: number; arah: ArahMataAngin };
 
 const ARAH_LIST: {
   key: ArahMataAngin;
@@ -51,14 +229,10 @@ const ARAH_LIST: {
   { key: "barat", label: "Barat", icon: "arrow-back", derajat: 180 },
 ];
 
-// ============================================
-// HELPER: KONVERSI SISI → POLYGON
-// ============================================
 function sisiKePolygon(sisiList: SisiLahan[]): { x: number; y: number }[] {
-  let x = 0;
-  let y = 0;
-  const points: { x: number; y: number }[] = [{ x, y }];
-
+  let x = 0,
+    y = 0;
+  const points = [{ x, y }];
   for (const sisi of sisiList) {
     const arah = ARAH_LIST.find((a) => a.key === sisi.arah);
     if (!arah) continue;
@@ -67,16 +241,12 @@ function sisiKePolygon(sisiList: SisiLahan[]): { x: number; y: number }[] {
     y += sisi.panjang * Math.sin(rad);
     points.push({ x, y });
   }
-
   return points;
 }
 
-// ============================================
-// HELPER: HITUNG SISI PENUTUP OTOMATIS
-// ============================================
 function hitungSisiPenutup(sisiList: SisiLahan[]) {
-  let x = 0;
-  let y = 0;
+  let x = 0,
+    y = 0;
   for (const sisi of sisiList) {
     const arah = ARAH_LIST.find((a) => a.key === sisi.arah);
     if (!arah) continue;
@@ -84,52 +254,42 @@ function hitungSisiPenutup(sisiList: SisiLahan[]) {
     x += sisi.panjang * Math.cos(rad);
     y += sisi.panjang * Math.sin(rad);
   }
-
-  const dx = -x;
-  const dy = -y;
+  const dx = -x,
+    dy = -y;
   const panjang = Math.hypot(dx, dy);
-
-  if (panjang < 0.1) {
+  if (panjang < 0.1)
     return {
       perlu: false,
       panjang: 0,
       arah: "barat" as ArahMataAngin,
-      pesan: "Polygon sudah tertutup sempurna!",
+      pesan: "Tertutup sempurna",
     };
-  }
-
-  let arah: ArahMataAngin;
-  if (Math.abs(dx) > Math.abs(dy)) {
-    arah = dx > 0 ? "timur" : "barat";
-  } else {
-    arah = dy > 0 ? "utara" : "selatan";
-  }
-
+  let arah: ArahMataAngin =
+    Math.abs(dx) > Math.abs(dy)
+      ? dx > 0
+        ? "timur"
+        : "barat"
+      : dy > 0
+        ? "utara"
+        : "selatan";
   return {
     perlu: true,
     panjang: Math.round(panjang * 100) / 100,
     arah,
-    pesan: `Sisi penutup otomatis: ${panjang.toFixed(2)}m arah ${arah.toUpperCase()}`,
+    pesan: `Sisi penutup: ${panjang.toFixed(2)}m`,
   };
 }
 
-// ============================================
-// HELPER: LUAS POLYGON (SHOELACE)
-// ============================================
 function luasPolygon(points: { x: number; y: number }[]): number {
   if (points.length < 3) return 0;
   let luas = 0;
-  const n = points.length;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
+  for (let i = 0; i < points.length; i++) {
+    const j = (i + 1) % points.length;
     luas += points[i].x * points[j].y - points[j].x * points[i].y;
   }
   return Math.abs(luas) / 2;
 }
 
-// ============================================
-// HELPER: BOUNDING BOX
-// ============================================
 function boundingBox(points: { x: number; y: number }[]) {
   if (points.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
   let minX = Infinity,
@@ -137,10 +297,10 @@ function boundingBox(points: { x: number; y: number }[]) {
     maxX = -Infinity,
     maxY = -Infinity;
   for (const p of points) {
-    if (p.x < minX) minX = p.x;
-    if (p.y < minY) minY = p.y;
-    if (p.x > maxX) maxX = p.x;
-    if (p.y > maxY) maxY = p.y;
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
   }
   return { minX, minY, maxX, maxY };
 }
@@ -150,16 +310,13 @@ function boundingBox(points: { x: number; y: number }[]) {
 // ============================================
 export default function FormProyekScreen() {
   const router = useRouter();
+  const mapRef = useRef<MapView>(null);
 
   // ==== STATE PROYEK ====
   const [namaProyek, setNamaProyek] = useState("");
   const [bentukLahan, setBentukLahan] = useState<BentukLahan>("kotak");
-
-  // ==== STATE DIMENSI KOTAK ====
   const [panjang, setPanjang] = useState(0);
   const [lebar, setLebar] = useState(0);
-
-  // ==== STATE POLYGON ====
   const [sisiList, setSisiList] = useState<SisiLahan[]>([
     { id: "s1", panjang: 0, arah: "utara" },
     { id: "s2", panjang: 0, arah: "timur" },
@@ -167,12 +324,27 @@ export default function FormProyekScreen() {
     { id: "s4", panjang: 0, arah: "barat" },
   ]);
 
-  // ==== STATE LOKASI ====
+  // ==== STATE LOKASI & PETA ====
   const [selectedRegion, setSelectedRegion] = useState<RegionOption | null>(
     null,
   );
   const [modalVisible, setModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  const [mapVisible, setMapVisible] = useState(false);
+  const [mapRegion, setMapRegion] = useState<Region>({
+    latitude: -7.7956,
+    longitude: 110.3695,
+    latitudeDelta: 0.05,
+    longitudeDelta: 0.05,
+  });
+  const [markerCoord, setMarkerCoord] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+
+  const [mapSearchQuery, setMapSearchQuery] = useState("");
+  const [searchingMap, setSearchingMap] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -180,178 +352,268 @@ export default function FormProyekScreen() {
   // HITUNG LUAS
   // ============================================
   const totalLuas = useMemo(() => {
-    if (bentukLahan === "kotak") {
-      const luas = panjang * lebar;
-      return Math.round(luas * 100) / 100;
-    }
-    if (bentukLahan === "polygon-sisi") {
-      const points = sisiKePolygon(sisiList);
-      return Math.round(luasPolygon(points) * 100) / 100;
-    }
+    if (bentukLahan === "kotak") return Math.round(panjang * lebar * 100) / 100;
+    if (bentukLahan === "polygon-sisi")
+      return Math.round(luasPolygon(sisiKePolygon(sisiList)) * 100) / 100;
     return 0;
   }, [bentukLahan, panjang, lebar, sisiList]);
 
   const areaBangun = Math.round(totalLuas * 0.6);
-
-  // ============================================
-  // HITUNG POLYGON, BBOX, SISI PENUTUP
-  // ============================================
-  const polygonPoints = useMemo(() => {
-    if (bentukLahan !== "polygon-sisi") return null;
-    return sisiKePolygon(sisiList);
-  }, [bentukLahan, sisiList]);
-
-  const bbox = useMemo(() => {
-    if (!polygonPoints || polygonPoints.length < 3) {
-      return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-    }
-    return boundingBox(polygonPoints);
-  }, [polygonPoints]);
+  const polygonPoints = useMemo(
+    () => (bentukLahan !== "polygon-sisi" ? null : sisiKePolygon(sisiList)),
+    [bentukLahan, sisiList],
+  );
+  const bbox = useMemo(
+    () =>
+      !polygonPoints || polygonPoints.length < 3
+        ? { minX: 0, minY: 0, maxX: 0, maxY: 0 }
+        : boundingBox(polygonPoints),
+    [polygonPoints],
+  );
 
   const sisiPenutup = useMemo(() => {
-    if (bentukLahan === "kotak") {
+    if (bentukLahan === "kotak")
       return {
         perlu: false,
         panjang: 0,
         arah: "barat" as ArahMataAngin,
         pesan: "",
       };
-    }
     return hitungSisiPenutup(sisiList);
   }, [bentukLahan, sisiList]);
 
   // ============================================
-  // FILTER REGION
-  // ============================================
-  const filteredRegions = useMemo(() => {
-    if (!searchQuery.trim()) return REGIONS;
-    const q = searchQuery.toLowerCase();
-    return REGIONS.filter(
-      (r) =>
-        r.nama.toLowerCase().includes(q) ||
-        r.provinsi.toLowerCase().includes(q),
-    );
-  }, [searchQuery]);
-
-  // ============================================
   // HANDLER SISI
   // ============================================
-  const tambahSisi = () => {
+  const tambahSisi = () =>
     setSisiList((prev) => [
       ...prev,
       { id: `s${Date.now()}`, panjang: 0, arah: "timur" },
     ]);
-  };
-
   const hapusSisi = (id: string) => {
-    if (sisiList.length <= 3) {
-      Alert.alert("Minimal 3 Sisi", "Polygon butuh minimal 3 sisi.");
-      return;
-    }
+    if (sisiList.length <= 3)
+      return Alert.alert("Minimal 3 Sisi", "Polygon butuh minimal 3 sisi.");
     setSisiList((prev) => prev.filter((s) => s.id !== id));
   };
-
-  const updateSisi = (id: string, patch: Partial<SisiLahan>) => {
+  const updateSisi = (id: string, patch: Partial<SisiLahan>) =>
     setSisiList((prev) =>
       prev.map((s) => (s.id === id ? { ...s, ...patch } : s)),
     );
-  };
 
   // ============================================
-  // PILIH REGION
+  // HANDLER LOKASI (SINKRONISASI & BATAS WILAYAH)
   // ============================================
   const handleSelectRegion = (region: RegionOption) => {
     setSelectedRegion(region);
     setModalVisible(false);
     setSearchQuery("");
-  };
 
-  // ============================================
-  // TEST KONEKSI
-  // ============================================
-  const testKoneksi = async (): Promise<boolean> => {
-    try {
-      await axios.get(`${API_URL}/regions/`, { timeout: 5000 });
-      return true;
-    } catch (err: any) {
-      return false;
+    const newCoord = { latitude: region.latitude, longitude: region.longitude };
+    setMarkerCoord(newCoord);
+    setMapRegion({ ...newCoord, latitudeDelta: 0.05, longitudeDelta: 0.05 });
+
+    if (mapRef.current) {
+      mapRef.current.animateToRegion(
+        { ...newCoord, latitudeDelta: 0.05, longitudeDelta: 0.05 },
+        800,
+      );
     }
   };
 
+  const handleOpenMap = () => {
+    if (!selectedRegion) {
+      return Alert.alert(
+        "Pilih Kabupaten",
+        "Harap pilih Kabupaten/Kota terlebih dahulu sebelum membuka peta.",
+      );
+    }
+
+    if (markerCoord) {
+      setMapRegion({
+        ...markerCoord,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      });
+    } else {
+      const newCoord = {
+        latitude: selectedRegion.latitude,
+        longitude: selectedRegion.longitude,
+      };
+      setMarkerCoord(newCoord);
+      setMapRegion({ ...newCoord, latitudeDelta: 0.05, longitudeDelta: 0.05 });
+    }
+    setMapSearchQuery("");
+    setMapVisible(true);
+  };
+
+  const isValidCoordinate = (lat: number, lng: number) => {
+    if (!selectedRegion) return false;
+    return (
+      lat >= selectedRegion.minLat &&
+      lat <= selectedRegion.maxLat &&
+      lng >= selectedRegion.minLng &&
+      lng <= selectedRegion.maxLng
+    );
+  };
+
+  const handleMapPress = (e: any) => {
+    const { latitude, longitude } = e.nativeEvent.coordinate;
+
+    if (!isValidCoordinate(latitude, longitude)) {
+      Alert.alert(
+        "Di Luar Wilayah",
+        `Titik yang Anda pilih berada di luar Kabupaten ${selectedRegion?.nama}. Silakan pilih titik di dalam wilayah tersebut.`,
+      );
+      return;
+    }
+
+    setMarkerCoord({ latitude, longitude });
+  };
+
   // ============================================
-  // SUBMIT
+  // PENCARIAN PETA (MENGGUNAKAN NOMINATIM - TOLERAN)
+  // ============================================
+  const handleMapSearch = async () => {
+    if (!mapSearchQuery.trim()) return;
+    setSearchingMap(true);
+    try {
+      const viewbox = `${selectedRegion?.minLng},${selectedRegion?.maxLat},${selectedRegion?.maxLng},${selectedRegion?.minLat}`;
+
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(mapSearchQuery)}&limit=5&viewbox=${viewbox}`,
+        { headers: { "User-Agent": "AndariApp/1.0" } },
+      );
+
+      const data = await response.json();
+
+      if (data && data.length > 0) {
+        const item = data[0];
+        const lat = parseFloat(item.lat);
+        const lon = parseFloat(item.lon);
+
+        if (isValidCoordinate(lat, lon)) {
+          const newCoord = { latitude: lat, longitude: lon };
+          setMarkerCoord(newCoord);
+          setMapRegion({
+            ...newCoord,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          });
+
+          if (mapRef.current) {
+            mapRef.current.animateToRegion(
+              { ...newCoord, latitudeDelta: 0.01, longitudeDelta: 0.01 },
+              800,
+            );
+          }
+        } else {
+          Alert.alert(
+            "Lokasi Di Luar Wilayah",
+            `Lokasi "${item.display_name}" ditemukan, tetapi berada di luar Kabupaten ${selectedRegion?.nama}.\n\nApakah Anda ingin tetap menggunakan titik ini?`,
+            [
+              { text: "Batal", style: "cancel" },
+              {
+                text: "Gunakan Tetap",
+                onPress: () => {
+                  const newCoord = { latitude: lat, longitude: lon };
+                  setMarkerCoord(newCoord);
+                  setMapRegion({
+                    ...newCoord,
+                    latitudeDelta: 0.01,
+                    longitudeDelta: 0.01,
+                  });
+                  if (mapRef.current) {
+                    mapRef.current.animateToRegion(
+                      {
+                        ...newCoord,
+                        latitudeDelta: 0.01,
+                        longitudeDelta: 0.01,
+                      },
+                      800,
+                    );
+                  }
+                },
+              },
+            ],
+          );
+        }
+      } else {
+        Alert.alert(
+          "Tidak Ditemukan",
+          `Tempat dengan nama "${mapSearchQuery}" tidak ditemukan. Coba ketik nama jalan atau kecamatan.`,
+        );
+      }
+    } catch (err) {
+      Alert.alert("Error", "Gagal mencari lokasi. Periksa koneksi internet.");
+    } finally {
+      setSearchingMap(false);
+    }
+  };
+
+  const handleConfirmLocation = () => {
+    if (!markerCoord) {
+      Alert.alert("Pilih Lokasi", "Ketuk peta untuk memilih titik lokasi.");
+      return;
+    }
+
+    if (!isValidCoordinate(markerCoord.latitude, markerCoord.longitude)) {
+      Alert.alert(
+        "Di Luar Wilayah",
+        "Pin berada di luar batas kabupaten yang dipilih.",
+      );
+      return;
+    }
+
+    setSelectedRegion({
+      ...selectedRegion!,
+      latitude: markerCoord.latitude,
+      longitude: markerCoord.longitude,
+    });
+
+    setMapVisible(false);
+  };
+
+  // ============================================
+  // SUBMIT (SIMPAN KE DATABASE LOKAL SQLITE)
   // ============================================
   const handleSubmit = async () => {
-    // ============ VALIDASI ============
-    if (!namaProyek.trim()) {
-      Alert.alert("Validasi", "Nama proyek wajib diisi.");
-      return;
-    }
-    if (!selectedRegion) {
-      Alert.alert("Validasi", "Pilih lokasi/daerah terlebih dahulu.");
-      return;
-    }
+    if (!namaProyek.trim())
+      return Alert.alert("Validasi", "Nama proyek wajib diisi.");
+    if (!selectedRegion)
+      return Alert.alert("Validasi", "Pilih lokasi/daerah terlebih dahulu.");
 
-    if (bentukLahan === "kotak") {
-      if (panjang <= 0 || lebar <= 0) {
-        Alert.alert(
-          "Validasi",
-          "Panjang & lebar harus lebih dari 0. Isi dimensi lahan terlebih dahulu.",
-        );
-        return;
-      }
-    } else if (bentukLahan === "polygon-sisi") {
-      if (sisiList.length < 3) {
-        Alert.alert("Validasi", "Polygon butuh minimal 3 sisi.");
-        return;
-      }
-      const adaSisiKosong = sisiList.some((s) => s.panjang <= 0);
-      if (adaSisiKosong) {
-        Alert.alert(
-          "Validasi",
-          "Semua sisi harus memiliki panjang lebih dari 0.",
-        );
-        return;
-      }
-      const cek = hitungSisiPenutup(sisiList);
-      if (cek.perlu && cek.panjang > 50) {
-        Alert.alert(
-          "Validasi",
-          "Polygon terlalu jauh dari titik awal. Periksa kembali arah & panjang sisi.",
-        );
-        return;
-      }
+    if (bentukLahan === "kotak" && (panjang <= 0 || lebar <= 0))
+      return Alert.alert("Validasi", "Panjang & lebar harus > 0.");
+    if (bentukLahan === "polygon-sisi") {
+      if (sisiList.length < 3)
+        return Alert.alert("Validasi", "Polygon butuh minimal 3 sisi.");
+      if (sisiList.some((s) => s.panjang <= 0))
+        return Alert.alert("Validasi", "Semua sisi harus > 0.");
     }
 
     try {
       setSubmitting(true);
 
-      let projectId = `local-${Date.now()}`;
-      let buildingId = `local-${Date.now()}`;
-      let backendOK = false;
-
-      let bentukFinal: BentukLahan = bentukLahan;
-      let panjangFinal = 0;
-      let lebarFinal = 0;
-      let polygonFinal: { x: number; y: number }[] | null = null;
-      let bboxFinal = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-      let luasFinal = 0;
+      let bentukFinal = bentukLahan,
+        panjangFinal = 0,
+        lebarFinal = 0,
+        polygonFinal = null,
+        bboxFinal = { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+        luasFinal = 0;
 
       if (bentukLahan === "kotak") {
         panjangFinal = panjang;
         lebarFinal = lebar;
-        polygonFinal = null;
         bboxFinal = { minX: 0, minY: 0, maxX: panjang, maxY: lebar };
         luasFinal = Math.round(panjang * lebar * 100) / 100;
       } else if (bentukLahan === "polygon-sisi") {
         const rawPoly = sisiKePolygon(sisiList);
-        const first = rawPoly[0];
-        const last = rawPoly[rawPoly.length - 1];
-        const jarak = Math.hypot(last.x - first.x, last.y - first.y);
+        const jarak = Math.hypot(
+          rawPoly[rawPoly.length - 1].x - rawPoly[0].x,
+          rawPoly[rawPoly.length - 1].y - rawPoly[0].y,
+        );
         const polygonClean = jarak < 0.01 ? rawPoly.slice(0, -1) : rawPoly;
-
         const bb = boundingBox(polygonClean);
-
         polygonFinal = polygonClean;
         bboxFinal = {
           minX: bb.minX,
@@ -359,7 +621,6 @@ export default function FormProyekScreen() {
           maxX: bb.maxX,
           maxY: bb.maxY,
         };
-
         panjangFinal = Math.round((bb.maxX - bb.minX) * 100) / 100;
         lebarFinal = Math.round((bb.maxY - bb.minY) * 100) / 100;
         luasFinal = Math.round(luasPolygon(polygonClean) * 100) / 100;
@@ -367,7 +628,6 @@ export default function FormProyekScreen() {
         bentukFinal = "polygon-bebas";
         panjangFinal = 20;
         lebarFinal = 20;
-        polygonFinal = null;
         bboxFinal = { minX: 0, minY: 0, maxX: 20, maxY: 20 };
         luasFinal = 400;
       }
@@ -381,70 +641,45 @@ export default function FormProyekScreen() {
         luas: luasFinal,
       };
 
-      const ok = await testKoneksi();
-      backendOK = ok;
+      // ✅ SIMPAN KE DATABASE LOKAL (SQLite)
+      // Fungsi ini mengembalikan ID unik dari database
+      const newProjectId = simpanProyekBaru(
+        namaProyek.trim(),
+        `${panjangFinal}m x ${lebarFinal}m`,
+        bentukFinal === "kotak"
+          ? "Kotak"
+          : bentukFinal === "polygon-sisi"
+            ? "Polygon Sisi"
+            : "Polygon Bebas",
+        dataLahan,
+      );
 
-      if (backendOK) {
-        try {
-          const payloadProject = {
-            nama_proyek: namaProyek.trim(),
-            panjang_lahan: panjangFinal,
-            lebar_lahan: lebarFinal,
-            region: selectedRegion.id,
-            bentuk_lahan: bentukFinal,
-            polygon: polygonFinal ? JSON.stringify(polygonFinal) : null,
-            luas_lahan: luasFinal,
-          };
-
-          const projectRes = await axios.post(
-            `${API_URL}/projects/`,
-            payloadProject,
-            { timeout: API_TIMEOUT },
-          );
-
-          projectId = projectRes.data.id.toString();
-
-          const buildingRes = await axios.post(
-            `${API_URL}/buildings/`,
-            { project: projectId, nama: "Bangunan Utama" },
-            { timeout: API_TIMEOUT },
-          );
-
-          buildingId = buildingRes.data.id.toString();
-
-          await axios.post(
-            `${API_URL}/floors/`,
-            { building: buildingId, level: 1, tinggi_dinding: 3.0 },
-            { timeout: API_TIMEOUT },
-          );
-        } catch (submitErr: any) {
-          backendOK = false;
-        }
-      }
-
-      if (!backendOK) {
-        Alert.alert(
-          "⚠️ Mode Offline",
-          `Tidak bisa terhubung ke server.\n\nData akan disimpan sementara di HP.`,
-          [{ text: "OK, Lanjut" }],
-        );
-      }
-
+      // ✅ LANJUT KE HALAMAN GRID DENAH
       router.push({
         pathname: "/grid-denah",
         params: {
-          projectId: projectId.toString(),
-          buildingId: buildingId.toString(),
+          projectId: newProjectId.toString(), // Mengirim ID dari SQLite
+          buildingId: "local",
           dataLahan: JSON.stringify(dataLahan),
           panjang: panjangFinal.toString(),
           lebar: lebarFinal.toString(),
           regionId: selectedRegion.id.toString(),
           namaProyek: namaProyek.trim(),
-          backendOK: backendOK ? "true" : "false",
+          backendOK: "false", // Selalu false karena kita murni offline
+          latitude: (
+            markerCoord?.latitude ||
+            selectedRegion.latitude ||
+            ""
+          ).toString(),
+          longitude: (
+            markerCoord?.longitude ||
+            selectedRegion.longitude ||
+            ""
+          ).toString(),
         },
       });
     } catch (err: any) {
-      Alert.alert("Error", err?.message || "Terjadi kesalahan.");
+      Alert.alert("Error", err?.message || "Terjadi kesalahan saat menyimpan.");
     } finally {
       setSubmitting(false);
     }
@@ -459,7 +694,7 @@ export default function FormProyekScreen() {
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {/* HEADER BARU */}
+        {/* HEADER */}
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.headerBackBtn}
@@ -516,9 +751,7 @@ export default function FormProyekScreen() {
                 </Text>
               </View>
             </View>
-
             <View style={styles.bentukRow}>
-              {/* Kotak */}
               <TouchableOpacity
                 style={[
                   styles.bentukBtn,
@@ -548,8 +781,6 @@ export default function FormProyekScreen() {
                 </Text>
                 <Text style={styles.bentukDesc}>Persegi</Text>
               </TouchableOpacity>
-
-              {/* Polygon Sisi */}
               <TouchableOpacity
                 style={[
                   styles.bentukBtn,
@@ -582,8 +813,6 @@ export default function FormProyekScreen() {
                 </Text>
                 <Text style={styles.bentukDesc}>Per Sisi</Text>
               </TouchableOpacity>
-
-              {/* Polygon Bebas */}
               <TouchableOpacity
                 style={[
                   styles.bentukBtn,
@@ -619,7 +848,7 @@ export default function FormProyekScreen() {
             </View>
           </View>
 
-          {/* INPUT KOTAK */}
+          {/* INPUT DIMENSI / SISI */}
           {bentukLahan === "kotak" && (
             <View style={styles.card}>
               <View style={styles.cardHeader}>
@@ -628,7 +857,6 @@ export default function FormProyekScreen() {
                 </View>
                 <Text style={styles.cardTitle}>Dimensi Lahan</Text>
               </View>
-
               <View style={styles.dimensiRow}>
                 <View style={styles.dimensiBox}>
                   <Text style={styles.dimensiLabel}>Lebar (m)</Text>
@@ -642,10 +870,9 @@ export default function FormProyekScreen() {
                     <TextInput
                       style={styles.stepValue}
                       value={String(lebar)}
-                      onChangeText={(t) => {
-                        const v = parseFloat(t.replace(/[^0-9.]/g, "")) || 0;
-                        setLebar(v);
-                      }}
+                      onChangeText={(t) =>
+                        setLebar(parseFloat(t.replace(/[^0-9.]/g, "")) || 0)
+                      }
                       keyboardType="numeric"
                       selectTextOnFocus
                     />
@@ -657,7 +884,6 @@ export default function FormProyekScreen() {
                     </TouchableOpacity>
                   </View>
                 </View>
-
                 <View style={styles.dimensiBox}>
                   <Text style={styles.dimensiLabel}>Panjang (m)</Text>
                   <View style={styles.stepper}>
@@ -670,10 +896,9 @@ export default function FormProyekScreen() {
                     <TextInput
                       style={styles.stepValue}
                       value={String(panjang)}
-                      onChangeText={(t) => {
-                        const v = parseFloat(t.replace(/[^0-9.]/g, "")) || 0;
-                        setPanjang(v);
-                      }}
+                      onChangeText={(t) =>
+                        setPanjang(parseFloat(t.replace(/[^0-9.]/g, "")) || 0)
+                      }
                       keyboardType="numeric"
                       selectTextOnFocus
                     />
@@ -689,7 +914,6 @@ export default function FormProyekScreen() {
             </View>
           )}
 
-          {/* INPUT POLYGON SISI */}
           {bentukLahan === "polygon-sisi" && (
             <View style={styles.card}>
               <View style={styles.cardHeader}>
@@ -714,13 +938,11 @@ export default function FormProyekScreen() {
                   <Text style={styles.addSisiText}>Sisi</Text>
                 </TouchableOpacity>
               </View>
-
               {sisiList.map((sisi, idx) => (
                 <View key={sisi.id} style={styles.sisiRow}>
                   <View style={styles.sisiNumber}>
                     <Text style={styles.sisiNumberText}>{idx + 1}</Text>
                   </View>
-
                   <View style={styles.sisiStepper}>
                     <TouchableOpacity
                       style={styles.sisiStepBtn}
@@ -735,13 +957,12 @@ export default function FormProyekScreen() {
                     <TextInput
                       style={styles.sisiStepValue}
                       value={sisi.panjang.toString()}
-                      onChangeText={(t) => {
-                        const v = parseFloat(t.replace(/[^0-9.]/g, "")) || 0;
-                        updateSisi(sisi.id, { panjang: v });
-                      }}
+                      onChangeText={(t) =>
+                        updateSisi(sisi.id, {
+                          panjang: parseFloat(t.replace(/[^0-9.]/g, "")) || 0,
+                        })
+                      }
                       keyboardType="numeric"
-                      placeholder="0"
-                      placeholderTextColor="#94A3B8"
                       selectTextOnFocus
                     />
                     <TouchableOpacity
@@ -755,7 +976,6 @@ export default function FormProyekScreen() {
                       <Ionicons name="add" size={14} color="#0F172A" />
                     </TouchableOpacity>
                   </View>
-
                   <View style={styles.arahWrap}>
                     {ARAH_LIST.map((a) => (
                       <TouchableOpacity
@@ -774,7 +994,6 @@ export default function FormProyekScreen() {
                       </TouchableOpacity>
                     ))}
                   </View>
-
                   <TouchableOpacity
                     style={styles.sisiDeleteBtn}
                     onPress={() => hapusSisi(sisi.id)}
@@ -783,7 +1002,6 @@ export default function FormProyekScreen() {
                   </TouchableOpacity>
                 </View>
               ))}
-
               <View
                 style={[
                   styles.validasiBox,
@@ -804,9 +1022,7 @@ export default function FormProyekScreen() {
                 <Text
                   style={[
                     styles.validasiText,
-                    {
-                      color: !sisiPenutup.perlu ? "#166534" : "#1E3A8A",
-                    },
+                    { color: !sisiPenutup.perlu ? "#166534" : "#1E3A8A" },
                   ]}
                 >
                   {sisiPenutup.perlu
@@ -817,7 +1033,6 @@ export default function FormProyekScreen() {
             </View>
           )}
 
-          {/* INFO POLYGON BEBAS */}
           {bentukLahan === "polygon-bebas" && (
             <View style={styles.card}>
               <View style={styles.bebasHeader}>
@@ -828,7 +1043,7 @@ export default function FormProyekScreen() {
               </View>
               <Text style={styles.bebasDesc}>
                 Anda akan diarahkan ke halaman Grid Denah. Ketuk titik-titik
-                sudut lahan pada grid, lalu tutup dengan mengetuk titik pertama.
+                sudut lahan, lalu tutup dengan titik pertama.
               </Text>
             </View>
           )}
@@ -858,9 +1073,9 @@ export default function FormProyekScreen() {
                 <Ionicons name="location-outline" size={16} color="#2563EB" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>Lokasi / Daerah</Text>
+                <Text style={styles.cardTitle}>Lokasi Proyek</Text>
                 <Text style={styles.cardSubtitle}>
-                  Pilih kota tempat rumah dibangun.
+                  Pilih Kabupaten/Kota di Jawa Tengah & DIY.
                 </Text>
               </View>
             </View>
@@ -872,7 +1087,7 @@ export default function FormProyekScreen() {
             >
               <View style={styles.locationLeft}>
                 <Ionicons
-                  name="map"
+                  name="list"
                   size={18}
                   color={selectedRegion ? "#EA580C" : "#94A3B8"}
                 />
@@ -883,11 +1098,40 @@ export default function FormProyekScreen() {
                       !selectedRegion && styles.locationPlaceholder,
                     ]}
                   >
-                    {selectedRegion ? selectedRegion.nama : "Cari kota..."}
+                    {selectedRegion
+                      ? selectedRegion.nama
+                      : "Pilih dari daftar kabupaten..."}
                   </Text>
                   {selectedRegion && (
                     <Text style={styles.locationButtonSub}>
                       {selectedRegion.provinsi}
+                    </Text>
+                  )}
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.locationButton,
+                { marginTop: 10 },
+                !selectedRegion && { opacity: 0.5 },
+              ]}
+              onPress={handleOpenMap}
+              disabled={!selectedRegion}
+              activeOpacity={0.7}
+            >
+              <View style={styles.locationLeft}>
+                <Ionicons name="map" size={18} color="#2563EB" />
+                <View style={{ marginLeft: 10 }}>
+                  <Text style={styles.locationButtonText}>
+                    Tentukan Titik Koordinat di Peta
+                  </Text>
+                  {markerCoord && (
+                    <Text style={styles.locationButtonSub}>
+                      {markerCoord.latitude.toFixed(5)},{" "}
+                      {markerCoord.longitude.toFixed(5)}
                     </Text>
                   )}
                 </View>
@@ -918,7 +1162,7 @@ export default function FormProyekScreen() {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* MODAL LOKASI */}
+        {/* MODAL DAFTAR KABUPATEN */}
         <Modal
           visible={modalVisible}
           animationType="slide"
@@ -928,17 +1172,16 @@ export default function FormProyekScreen() {
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Pilih Lokasi</Text>
+                <Text style={styles.modalTitle}>Pilih Kabupaten / Kota</Text>
                 <TouchableOpacity onPress={() => setModalVisible(false)}>
                   <Ionicons name="close" size={20} color="#0F172A" />
                 </TouchableOpacity>
               </View>
-
               <View style={styles.searchBar}>
                 <Ionicons name="search" size={18} color="#94A3B8" />
                 <TextInput
                   style={styles.searchInput}
-                  placeholder="Cari kota (misal: Jakarta)"
+                  placeholder="Cari kabupaten (misal: Sleman)"
                   placeholderTextColor="#94A3B8"
                   value={searchQuery}
                   onChangeText={setSearchQuery}
@@ -950,17 +1193,17 @@ export default function FormProyekScreen() {
                   </TouchableOpacity>
                 )}
               </View>
-
               <FlatList
-                data={filteredRegions}
+                data={REGIONS_KABUPATEN.filter(
+                  (r) =>
+                    r.nama.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    r.provinsi
+                      .toLowerCase()
+                      .includes(searchQuery.toLowerCase()),
+                )}
                 keyExtractor={(item) => item.id.toString()}
                 keyboardShouldPersistTaps="handled"
                 style={{ marginTop: 12 }}
-                ListEmptyComponent={
-                  <Text style={styles.dropdownEmpty}>
-                    Tidak ada kota yang cocok.
-                  </Text>
-                }
                 renderItem={({ item }) => (
                   <TouchableOpacity
                     style={[
@@ -993,12 +1236,121 @@ export default function FormProyekScreen() {
                         {item.provinsi}
                       </Text>
                     </View>
-                    {selectedRegion?.id === item.id && (
-                      <Ionicons name="checkmark" size={20} color="#EA580C" />
-                    )}
                   </TouchableOpacity>
                 )}
               />
+            </View>
+          </View>
+        </Modal>
+
+        {/* MODAL PETA (TERBATAS) */}
+        <Modal
+          visible={mapVisible}
+          animationType="slide"
+          onRequestClose={() => setMapVisible(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
+            <SafeAreaView
+              edges={["top"]}
+              style={{ backgroundColor: "#FFFFFF" }}
+            >
+              <View style={styles.mapHeader}>
+                <TouchableOpacity
+                  onPress={() => setMapVisible(false)}
+                  style={styles.mapHeaderBtn}
+                >
+                  <Ionicons name="close" size={24} color="#0F172A" />
+                </TouchableOpacity>
+                <Text style={styles.mapHeaderTitle}>
+                  Wilayah: {selectedRegion?.nama}
+                </Text>
+                <TouchableOpacity
+                  onPress={handleConfirmLocation}
+                  style={styles.mapConfirmBtn}
+                >
+                  <Text style={styles.mapConfirmText}>Pilih</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View
+                style={{
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  backgroundColor: "#FFFFFF",
+                  borderBottomWidth: 1,
+                  borderBottomColor: "#F1F5F9",
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    backgroundColor: "#F8FAFC",
+                    borderRadius: 12,
+                    paddingHorizontal: 12,
+                    height: 44,
+                    borderWidth: 1,
+                    borderColor: "#E2E8F0",
+                  }}
+                >
+                  <Ionicons name="search" size={18} color="#94A3B8" />
+                  <TextInput
+                    style={{
+                      flex: 1,
+                      marginLeft: 8,
+                      fontSize: 14,
+                      color: "#0F172A",
+                    }}
+                    placeholder={`Cari nama jalan/tempat di ${selectedRegion?.nama}...`}
+                    placeholderTextColor="#94A3B8"
+                    value={mapSearchQuery}
+                    onChangeText={setMapSearchQuery}
+                    onSubmitEditing={handleMapSearch}
+                    returnKeyType="search"
+                  />
+                  <TouchableOpacity
+                    onPress={handleMapSearch}
+                    disabled={searchingMap}
+                  >
+                    {searchingMap ? (
+                      <ActivityIndicator size="small" color="#2563EB" />
+                    ) : (
+                      <Text
+                        style={{
+                          color: "#2563EB",
+                          fontWeight: "700",
+                          fontSize: 13,
+                        }}
+                      >
+                        Cari
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </SafeAreaView>
+
+            <MapView
+              ref={mapRef}
+              style={{ flex: 1 }}
+              provider={PROVIDER_GOOGLE}
+              region={mapRegion}
+              onRegionChangeComplete={setMapRegion}
+              onPress={handleMapPress}
+              showsUserLocation={true}
+              showsMyLocationButton={true}
+            >
+              {markerCoord && (
+                <Marker coordinate={markerCoord} title="Lokasi Proyek" />
+              )}
+            </MapView>
+
+            <View style={styles.mapHint}>
+              <Ionicons name="information-circle" size={16} color="#92400E" />
+              <Text style={styles.mapHintText}>
+                Ketuk peta di dalam area {selectedRegion?.nama} untuk menggeser
+                pin.
+              </Text>
             </View>
           </View>
         </Modal>
@@ -1012,8 +1364,6 @@ export default function FormProyekScreen() {
 // ============================================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
-
-  // ==== HEADER MODERN ====
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -1024,33 +1374,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
   },
-  headerBackBtn: {
-    padding: 8,
-    backgroundColor: "#F1F5F9",
-    borderRadius: 10,
-  },
-  headerTitleWrap: {
-    alignItems: "center",
-  },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: "800",
-    color: "#0F172A",
-  },
-  headerSubtitle: {
-    fontSize: 11,
-    color: "#64748B",
-    marginTop: 2,
-  },
+  headerBackBtn: { padding: 8, backgroundColor: "#F1F5F9", borderRadius: 10 },
+  headerTitleWrap: { alignItems: "center" },
+  headerTitle: { fontSize: 17, fontWeight: "800", color: "#0F172A" },
+  headerSubtitle: { fontSize: 11, color: "#64748B", marginTop: 2 },
   headerSettingsBtn: {
     padding: 8,
     backgroundColor: "#F1F5F9",
     borderRadius: 10,
   },
-
   scrollContent: { padding: 20, paddingBottom: 60 },
-
-  // ==== CARD MODERN ====
   card: {
     backgroundColor: "#FFFFFF",
     borderRadius: 20,
@@ -1070,19 +1403,13 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 14,
   },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#0F172A",
-  },
+  cardTitle: { fontSize: 15, fontWeight: "800", color: "#0F172A" },
   cardSubtitle: {
     fontSize: 11,
     color: "#64748B",
     marginTop: 2,
     lineHeight: 14,
   },
-
-  // Ikon-Ikon Warna (Dikecilkan)
   iconBoxBlue: {
     width: 32,
     height: 32,
@@ -1107,8 +1434,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  // ==== PILIHAN BENTUK LAHAN ====
   bentukRow: { flexDirection: "row", gap: 8 },
   bentukBtn: {
     flex: 1,
@@ -1120,10 +1445,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-  bentukBtnActive: {
-    backgroundColor: "#FFF7ED",
-    borderColor: "#EA580C",
-  },
+  bentukBtnActive: { backgroundColor: "#FFF7ED", borderColor: "#EA580C" },
   bentukIconBox: {
     width: 36,
     height: 36,
@@ -1141,8 +1463,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "500",
   },
-
-  // ==== DIMENSI / STEPPER ====
   dimensiRow: { flexDirection: "row", gap: 12 },
   dimensiBox: { flex: 1 },
   dimensiLabel: {
@@ -1169,8 +1489,6 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     paddingVertical: 6,
   },
-
-  // ==== POLYGON SISI ====
   addSisiBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1181,7 +1499,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   addSisiText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
-
   sisiRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1199,7 +1516,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   sisiNumberText: { fontSize: 11, fontWeight: "800", color: "#475569" },
-
   sisiStepper: {
     flexDirection: "row",
     alignItems: "center",
@@ -1219,13 +1535,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     textAlign: "center",
   },
-
-  arahWrap: {
-    flexDirection: "row",
-    gap: 4,
-    flex: 1,
-    justifyContent: "center",
-  },
+  arahWrap: { flexDirection: "row", gap: 4, flex: 1, justifyContent: "center" },
   arahBtn: {
     width: 28,
     height: 28,
@@ -1243,8 +1553,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  // ==== KOTAK VALIDASI ====
   validasiBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -1256,8 +1564,6 @@ const styles = StyleSheet.create({
   validasiBoxOK: { backgroundColor: "#DCFCE7" },
   validasiBoxInfo: { backgroundColor: "#EFF6FF" },
   validasiText: { fontSize: 11, fontWeight: "700", flex: 1 },
-
-  // ==== POLYGON BEBAS ====
   bebasHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1265,13 +1571,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   bebasTitle: { fontSize: 15, fontWeight: "800", color: "#0F172A" },
-  bebasDesc: {
-    fontSize: 12,
-    color: "#475569",
-    lineHeight: 20,
-  },
-
-  // ==== KARTU TOTAL LUAS (DARK MODE) ====
+  bebasDesc: { fontSize: 12, color: "#475569", lineHeight: 20 },
   infoCard: {
     backgroundColor: "#1E293B",
     borderRadius: 20,
@@ -1300,8 +1600,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginTop: 4,
   },
-
-  // ==== INPUT & LOKASI ====
   input: {
     borderWidth: 2,
     borderColor: "#F1F5F9",
@@ -1312,7 +1610,6 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     fontWeight: "600",
   },
-
   locationButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1332,8 +1629,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: "500",
   },
-
-  // ==== MODAL LOKASI ====
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.6)",
@@ -1390,15 +1685,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: "500",
   },
-  dropdownEmpty: {
-    padding: 32,
-    textAlign: "center",
-    color: "#64748B",
-    fontSize: 13,
-    fontWeight: "500",
-  },
-
-  // ==== TOMBOL LANJUT ====
   btn: {
     marginTop: 16,
     backgroundColor: "#EA580C",
@@ -1415,4 +1701,41 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   btnText: { color: "#FFFFFF", fontWeight: "800", fontSize: 15 },
+  mapHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+  },
+  mapHeaderBtn: { padding: 4 },
+  mapHeaderTitle: { fontSize: 15, fontWeight: "800", color: "#0F172A" },
+  mapConfirmBtn: {
+    backgroundColor: "#EA580C",
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  mapConfirmText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
+  mapHint: {
+    position: "absolute",
+    bottom: 40,
+    left: 20,
+    right: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  mapHintText: { flex: 1, fontSize: 12, color: "#92400E", fontWeight: "600" },
 });

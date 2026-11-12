@@ -15,7 +15,6 @@ import { Ionicons } from "@expo/vector-icons";
 
 // ============================================
 // DATA ALUR APLIKASI
-// (id tetap ada untuk key React, tapi tidak ditampilkan)
 // ============================================
 const ALUR_APLIKASI = [
   {
@@ -97,7 +96,7 @@ export default function HomeScreen() {
         </View>
 
         {/* ============================================ */}
-        {/* ALUR APLIKASI (TANPA ANGKA)                  */}
+        {/* ALUR APLIKASI                                */}
         {/* ============================================ */}
         <View style={styles.sectionContainer}>
           <View style={styles.sectionHeader}>
@@ -133,7 +132,6 @@ export default function HomeScreen() {
 
                 <View style={styles.cardContent}>
                   <View style={styles.cardHeader}>
-                    {/* ✅ Hanya Menampilkan Judul, Angka Dihilangkan */}
                     <Text style={styles.cardTitle}>{item.title}</Text>
                   </View>
                   <Text style={styles.cardDesc}>{item.desc}</Text>
@@ -214,18 +212,31 @@ export default function HomeScreen() {
       </ScrollView>
 
       {/* ============================================ */}
-      {/* BOTTOM NAVIGATION BAR                        */}
+      {/* BOTTOM NAVIGATION BAR (DIPERBARUI)           */}
       {/* ============================================ */}
       <View style={styles.bottomNavWrapper} pointerEvents="box-none">
         <View style={styles.bottomNavBar}>
+          {/* Tombol Home */}
           <TouchableOpacity
             style={styles.bottomNavItem}
             onPress={() => router.replace("/")}
             activeOpacity={0.8}
           >
             <View style={styles.activeIndicator} />
-            <Ionicons name="home" size={26} color="#EA580C" />
+            <Ionicons name="home" size={24} color="#EA580C" />
             <Text style={styles.bottomNavText}>Home</Text>
+          </TouchableOpacity>
+
+          {/* ✅ Tombol Proyek (Tambahan Baru) */}
+          <TouchableOpacity
+            style={styles.bottomNavItem}
+            onPress={() => router.push("/projek")}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="folder-open-outline" size={24} color="#64748B" />
+            <Text style={[styles.bottomNavText, { color: "#64748B" }]}>
+              Proyek
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -532,7 +543,7 @@ const styles = StyleSheet.create({
   bottomNavBar: {
     backgroundColor: "#FFFFFF",
     borderRadius: 30,
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     paddingVertical: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
@@ -541,6 +552,9 @@ const styles = StyleSheet.create({
     elevation: 12,
     borderWidth: 1,
     borderColor: "#F1F5F9",
+    flexDirection: "row", // ✅ Tambahan agar tombol sejajar ke samping
+    alignItems: "center",
+    gap: 8, // ✅ Jarak antar tombol
   },
   bottomNavItem: {
     alignItems: "center",

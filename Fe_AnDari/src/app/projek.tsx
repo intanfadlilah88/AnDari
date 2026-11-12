@@ -1,5 +1,5 @@
 // src/app/projek.tsx
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -12,25 +12,19 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import axios from "axios";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter, useFocusEffect } from "expo-router";
 
-// ⚠️ GANTI IP INI dengan IP laptop kamu (cek dengan `ipconfig`)
-const API_URL = "http://192.168.110.12:8000/api";
-const LOCAL_PROJECTS_KEY = "@andari_local_projects";
+// ✅ IMPORT FUNGSI DATABASE LOKAL (SQLite)
+import { ambilSemuaProyek, hapusProyek } from "../db";
 
-// Tipe data disamakan dengan output form-proyek.tsx
+// Tipe data disesuaikan dengan struktur tabel SQLite
 type Project = {
-  id: number | string;
+  id: number;
   nama_proyek: string;
-  bentuk_lahan: string;
-  panjang_lahan: number;
-  lebar_lahan: number;
-  luas_lahan: number;
-  region_nama?: string;
-  created_at: string;
-  backendOK?: boolean;
+  dimensi: string;
+  tipe: string;
+  data_desain: string;
+  tanggal_dibuat: string;
 };
 
 export default function ProjekScreen() {
@@ -38,69 +32,104 @@ export default function ProjekScreen() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // ✅ Fetch data dari Backend DAN Local Storage (Offline Mode)
-  const fetchProjects = useCallback(async (isRefresh = false) => {
+  // ✅ Fetch data dari SQLite Lokal
+  const fetchProjects = useCallback((isRefresh = false) => {
     try {
       if (isRefresh) setRefreshing(true);
       else setLoading(true);
-      setError(null);
 
-      let allProjects: Project[] = [];
-
-      // 1. Ambil data dari Local Storage (Hasil input form-proyek yang Offline)
-      try {
-        const localData = await AsyncStorage.getItem(LOCAL_PROJECTS_KEY);
-        if (localData) {
-          allProjects = [...JSON.parse(localData)];
-        }
-      } catch (e) {
-        console.warn("Gagal baca local projects", e);
-      }
-
-      // 2. Ambil data dari Backend API (Jika server menyala)
-      try {
-        const res = await axios.get(`${API_URL}/projects/`, {
-          timeout: 5000, // Timeout sebentar agar tidak kelamaan loading
-        });
-        const data = Array.isArray(res.data)
-          ? res.data
-          : (res.data.results ?? []);
-
-        // Gabungkan data API dengan data Lokal
-        allProjects = [...data, ...allProjects];
-      } catch (err: any) {
-        console.log("Gagal mengambil dari server, menggunakan data lokal.");
-        // Jika API gagal, kita tetap tampilkan data lokal (jika ada)
-        if (allProjects.length === 0) {
-          setError("Gagal terhubung ke server & belum ada proyek lokal.");
-        }
-      }
-
-      setProjects(allProjects);
-    } catch (err: any) {
-      setError("Terjadi kesalahan saat memuat data.");
+      const data = ambilSemuaProyek() as Project[];
+      setProjects(data);
+    } catch (err) {
+      console.error("Gagal mengambil proyek lokal:", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects]);
+  // ✅ Refresh otomatis saat halaman dibuka
+  useFocusEffect(
+    useCallback(() => {
+      fetchProjects();
+    }, [fetchProjects]),
+  );
 
   const onRefresh = () => {
     fetchProjects(true);
   };
 
+  // ============================================
+  // HANDLER: BUKA & EDIT PROYEK
+  // ============================================
   const handlePressProject = (item: Project) => {
-    // Arahkan ke halaman RAB dengan membawa ID proyek
-    router.push({
-      pathname: "/rab",
-      params: { projectId: item.id.toString() },
-    });
+    try {
+      // Parse data desain dari SQLite (jika ada)
+      const dataDesain = item.data_desain ? JSON.parse(item.data_desain) : {};
+
+      // Ekstrak panjang dan lebar dari string dimensi (misal: "12m x 7m")
+      const dimensiSplit = item.dimensi.replace(/m/g, "").split("x");
+      const panjang = parseFloat(dimensiSplit[0]?.trim()) || 0;
+      const lebar = parseFloat(dimensiSplit[1]?.trim()) || 0;
+
+      // ✅ Lempar ke halaman Grid Denah untuk diedit
+      router.push({
+        pathname: "/grid-denah",
+        params: {
+          projectId: item.id.toString(),
+          buildingId: "local",
+          namaProyek: item.nama_proyek,
+          panjang: panjang.toString(),
+          lebar: lebar.toString(),
+          regionId: "local_region",
+          backendOK: "false",
+          // Data lahan (bentuk, polygon, bbox)
+          dataLahan: JSON.stringify({
+            bentuk: item.tipe.toLowerCase().replace(" ", "-"),
+            panjang: panjang,
+            lebar: lebar,
+            luas: panjang * lebar,
+            polygon: dataDesain.lahanPolygon || null,
+            bbox: dataDesain.lahanPolygon
+              ? { minX: 0, minY: 0, maxX: panjang, maxY: lebar }
+              : { minX: 0, minY: 0, maxX: panjang || 20, maxY: lebar || 20 },
+          }),
+          // Data ruangan, dinding, dan area yang sudah pernah digambar
+          savedRooms: JSON.stringify(dataDesain.rooms || []),
+          savedWalls: JSON.stringify(dataDesain.walls || []),
+          savedAreas: JSON.stringify(dataDesain.areas || []),
+        },
+      });
+    } catch (error) {
+      Alert.alert("Error", "Gagal membuka detail proyek.");
+      console.error(error);
+    }
+  };
+
+  // ============================================
+  // HANDLER: HAPUS PROYEK
+  // ============================================
+  const handleDeleteProject = (item: Project) => {
+    Alert.alert(
+      "Hapus Proyek",
+      `Apakah Anda yakin ingin menghapus proyek "${item.nama_proyek}" secara permanen?`,
+      [
+        { text: "Batal", style: "cancel" },
+        {
+          text: "Hapus",
+          style: "destructive",
+          onPress: () => {
+            try {
+              hapusProyek(item.id);
+              fetchProjects(); // Refresh list setelah dihapus
+            } catch (error) {
+              Alert.alert("Error", "Gagal menghapus proyek.");
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleCreateNew = () => {
@@ -125,27 +154,22 @@ export default function ProjekScreen() {
     <TouchableOpacity
       style={styles.card}
       onPress={() => handlePressProject(item)}
+      onLongPress={() => handleDeleteProject(item)} // ✅ Tekan lama untuk hapus
       activeOpacity={0.7}
+      delayLongPress={400}
     >
       <View style={{ flex: 1 }}>
         <Text style={styles.cardTitle} numberOfLines={1}>
           {item.nama_proyek || "Tanpa Nama"}
         </Text>
 
-        {/* Menampilkan data persis seperti di form-proyek */}
-        <Text style={styles.cardSub}>
-          {item.panjang_lahan} m × {item.lebar_lahan} m • {item.luas_lahan} m²
-        </Text>
+        <Text style={styles.cardSub}>{item.dimensi}</Text>
 
         <View style={styles.cardFooter}>
-          <Text style={styles.cardSub}>
-            {item.bentuk_lahan === "kotak"
-              ? "Kotak"
-              : item.bentuk_lahan === "polygon-sisi"
-                ? "Polygon Sisi"
-                : "Polygon Bebas"}
+          <Text style={styles.cardSub}>{item.tipe}</Text>
+          <Text style={styles.cardDate}>
+            {formatTanggal(item.tanggal_dibuat)}
           </Text>
-          <Text style={styles.cardDate}>{formatTanggal(item.created_at)}</Text>
         </View>
       </View>
       <Ionicons name="chevron-forward" size={20} color="#94A3B8" />
@@ -169,23 +193,7 @@ export default function ProjekScreen() {
         />
       )}
 
-      {!loading && error && projects.length === 0 && (
-        <View style={styles.empty}>
-          <Ionicons name="cloud-offline-outline" size={60} color="#F87171" />
-          <Text style={[styles.emptyText, { color: "#B91C1C" }]}>
-            Gagal memuat data
-          </Text>
-          <Text style={styles.emptySub}>{error}</Text>
-          <TouchableOpacity
-            style={styles.retryBtn}
-            onPress={() => fetchProjects()}
-          >
-            <Text style={styles.retryText}>Coba Lagi</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {!loading && !error && projects.length === 0 && (
+      {!loading && projects.length === 0 && (
         <View style={styles.empty}>
           <Ionicons name="folder-open-outline" size={60} color="#CBD5E1" />
           <Text style={styles.emptyText}>Belum ada proyek</Text>
@@ -202,7 +210,7 @@ export default function ProjekScreen() {
       {!loading && projects.length > 0 && (
         <FlatList
           data={projects}
-          keyExtractor={(item, index) => `${item.id}-${index}`}
+          keyExtractor={(item) => item.id.toString()}
           renderItem={renderItem}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           refreshControl={
